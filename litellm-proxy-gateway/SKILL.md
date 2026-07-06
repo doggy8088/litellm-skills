@@ -85,5 +85,14 @@ print(response.choices[0].message.content)
 
 - 把 `model_name` 與 `litellm_params.model` 混淆。
 - 在正式環境用 master key 當一般 client key。
-- 沒有把 proxy 層的 key 權限與 provider key 權限分開管理。
+- 没有把 proxy 層的 key 權限與 provider key 權限分開管理。
 - 未測試 provider payload transform 就直接排查模型品質問題。
+
+## 使用情境與提示詞範例
+
+- **情境 1：建立基本 `config.yaml` 與多模型 Alias**
+  * *提示詞*：「幫我設計一個 LiteLLM Proxy 的 `config.yaml`。我需要設定兩個模型 alias：`course-gpt` 指向 `openai/gpt-4o-mini`，`course-claude` 指向 `anthropic/claude-3-5-haiku`。所有的 API keys 都必須從環境變數讀取。」
+- **情境 2：使用 OpenAI SDK 測試 Proxy 連線**
+  * *提示詞*：「我已經啟動了本地的 LiteLLM Proxy（`http://localhost:4000`）。請幫我寫一個 Python 測試腳本，使用標準的 `openai` SDK，搭配虛擬的金鑰（test-key），來呼叫我們在 proxy 中設定好的 `course-gpt` 模型。」
+- **情境 3：虛擬金鑰（Virtual Keys）與權限控管**
+  * *提示詞*：「我想在 LiteLLM Proxy 中啟用虛擬金鑰功能。請幫我寫一份教學，說明如何在 config 中啟用資料庫儲存 spend tracking，並寫出如何使用 admin key 透過 API 建立一個限制只能使用 `course-gpt` 且每日額度為 $1 USD 的虛擬金鑰。」

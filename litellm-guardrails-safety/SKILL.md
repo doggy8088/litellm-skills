@@ -86,3 +86,12 @@ guardrails:
 - `default_on` 未設定，導致 client 不傳 guardrails 時完全沒防護。
 - allow rule 太寬，例如 `.*` 或整個 MCP server 全開。
 - 把 guardrail 當唯一安全層，沒有 key、team、model access 與 audit logs。
+
+## 使用情境與提示詞範例
+
+- **情境 1：設定輸入過濾與內容審查（Content Moderation）**
+  * *提示詞*：「我想要在 LiteLLM Proxy 層阻擋學生的敏感詞輸入。請幫我設定 Llama Guard 或 OpenAI Moderation 作為 guardrail，在請求送達 LLM 之前進行內容審查，並拒絕不合規的請求。」
+- **情境 2：虛擬金鑰的模型權限白名單（Model Access Control）**
+  * *提示詞*：「為了避免學生濫用昂貴模型，我需要設計一個安全護欄：限制某個虛擬金鑰只能呼叫 `gpt-4o-mini`，如果該金鑰試圖呼叫 `gpt-4o` 則直接回傳權限錯誤。請寫出具體的配置與測試方法。」
+- **情境 3：使用 Proxy Call Hooks 自訂防護邏輯**
+  * *提示詞*：「我想在 LiteLLM Proxy 中寫一個自訂 of Python Hook（例如 `pre_call_hook`），用來檢查請求的 prompt 長度，如果超過 2000 個字元就直接攔截並拒絕呼叫。請提供這個 Python Hook 的寫法與掛載設定。」

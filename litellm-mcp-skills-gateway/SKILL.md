@@ -80,3 +80,12 @@ description: 設計、教學或審查 LiteLLM MCP Gateway、MCP REST API、MCP p
 - 忽略 agent 自身權限，導致 autonomous agent 可用工具過多。
 - 未對 MCP tool input 做 PII 或資料外洩檢查。
 - 讓學生使用正式 admin key 練習 `/add-model` 或 `/delete-key`。
+
+## 使用情境與提示詞範例
+
+- **情境 1：在 LiteLLM 中配置 MCP Servers**
+  * *提示詞*：「我想讓 LiteLLM Proxy 整合 Model Context Protocol (MCP)。請在 `config.yaml` 中配置一個 MCP server（例如連接到本地 sqlite 資料庫的 server），並示範如何讓 Proxy 底下的模型能動態使用該 MCP 工具。」
+- **情境 2：設定 MCP 工具的權限與過濾（MCP Permissions）**
+  * *提示詞*：「我們有很多 MCP 工具，但我想限制特定的虛擬金鑰只能使用讀取類型的 MCP 工具，不能執行寫入或刪除。請教我如何在 LiteLLM Gateway 中設定 MCP 工具的權限控管。」
+- **情境 3：Skills Gateway 與官方技能評估**
+  * *提示詞*：「請幫我分析 LiteLLM 官方的 Skills Gateway 與一般的 MCP gateway 有何不同？並寫出如何使用官方 `litellm-skills` 來讓 Agent 能自主管理 Proxy 中的 users 和 keys 的架構與安全性評估。」

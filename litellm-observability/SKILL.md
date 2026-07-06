@@ -74,3 +74,12 @@ litellm_settings:
 - 只紀錄成功請求，導致無法分析 provider error 或 budget exceeded。
 - 沒有 request id，無法把 client log、proxy log 與 provider log 串起來。
 - 把完整 prompt/response 傳到第三方平台前未做資料分類。
+
+## 使用情境與提示詞範例
+
+- **情境 1：設定全域 Logging 與 Webhook Callbacks**
+  * *提示詞*：「我想在 LiteLLM Proxy 中加入自訂的 logging callback。當每次 API 呼叫成功或失敗時，能將請求與回應的 token 用量、模型名稱發送到我指定的 Slack webhook。請幫我設計這個 config 與實作邏輯。」
+- **情境 2：與 OpenTelemetry / Langfuse 整合**
+  * *提示詞*：「為了教學展示，我想將 LiteLLM Proxy 的呼叫軌跡（Traces）同步到 Langfuse 進行可觀測性分析。請提供完整的 `config.yaml` 設定範例，包含如何安全地傳遞 Langfuse 的 public key 和 secret key。」
+- **情境 3：使用內建 Prometheus 指標監控**
+  * *提示詞*：「我想在 Kubernetes 部署 LiteLLM Proxy 並使用 Prometheus 來監控請求延遲（latency）和錯誤率。請教我如何在 `config.yaml` 中啟用 Prometheus telemetry 指標，並列出常用的 Prometheus query 語法。」

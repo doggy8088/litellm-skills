@@ -79,3 +79,12 @@ description: 設計、教學或審查 LiteLLM spend tracking、virtual keys、bu
 - 忘記 key expiry，導致課後仍可使用。
 - 沒有 request tags，最後只能看到總花費。
 - 把 soft budget 當 hard stop。
+
+## 使用情境與提示詞範例
+
+- **情境 1：專案與團隊成本歸因（Spend Tracking by Tags / Teams）**
+  * *提示詞*：「請教我如何在 LiteLLM Proxy 中透過 `tags` 或 `team_id` 來追蹤不同學生成員或專案的 API 呼叫成本。我需要看到如何在呼叫 API 時傳遞這些 metadata，以及如何在 Proxy 端進行成本統計。」
+- **情境 2：設定預算限制與額度警報（Budgets & Rate Limiting）**
+  * *提示詞*：「我想為某個特定的虛擬金鑰設定每週預算限制（Weekly Budget）。請寫出相關的 `config.yaml` 配置，或是使用管理 API 設定虛擬金鑰預算的步驟，並說明當預算超額時 LiteLLM 會回傳什麼錯誤碼。」
+- **情境 3：基礎成本估算與 Callback 整合**
+  * *提示詞*：「我不想用資料庫，但想在 Python SDK 呼叫完成後直接在終端機印出該次呼叫的 Token 用量與估算花費。請幫我用 `completion_cost()` 寫一個實作範例，說明它是如何計算不同 Provider 模型的價格。」

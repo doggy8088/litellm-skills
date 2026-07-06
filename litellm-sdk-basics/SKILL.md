@@ -77,3 +77,12 @@ print(response.usage)
 - 假設每個模型都支援同一組 tools、JSON mode、reasoning 或 streaming 行為。
 - 只看 `total_tokens`，沒有區分 prompt、completion、cache read 或 cache write。
 - 把 fallback、retry、timeout 留到正式環境才補。
+
+## 使用情境與提示詞範例
+
+- **情境 1：基礎 Completion 與異常處理**
+  * *提示詞*：「幫我用 LiteLLM Python SDK 寫一個基礎的 completion 腳本，使用 `openai/gpt-4o-mini`，並且要包含 rate limit 和 authentication 錯誤的 exception handling，不要將 API key 硬編碼在程式碼中。」
+- **情境 2：結構化輸出 (Structured Outputs)**
+  * *提示詞*：「我需要使用 LiteLLM SDK 設計一個 structured output 的範例，定義一個 Pydantic schema 來解析新聞摘要（包含 `title`、`summary` 、`tags`），並確保模型輸出符合該 schema，且在 Python 層進行再次驗證。」
+- **情境 3：函式呼叫 (Function Calling)**
+  * *提示詞*：「請幫我撰寫一個 LiteLLM 函式呼叫（Function Calling）的完整練習。定義一個可以查詢天氣的 `get_weather` 工具，並示範模型決定調用該工具、執行工具後將結果加回 messages，再取得最終模型回覆的完整 round-trip 流程。」

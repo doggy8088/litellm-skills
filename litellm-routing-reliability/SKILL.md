@@ -88,3 +88,12 @@ router_settings:
 - fallback 指到成本高很多的模型，沒有 budget 或告警。
 - 用同一個 provider、同一個 region 當唯一 fallback，無法抵抗 provider 或區域故障。
 - 沒有測試 rate limit 情境，只測 happy path。
+
+## 使用情境與提示詞範例
+
+- **情境 1：負載平衡與 Router 設定**
+  * *提示詞*：「我想為 `gpt-4o-mini` 設計一個負載平衡（Load Balancing）的 Router 設定。請幫我寫一個 `config.yaml`，配置兩個不同的 API keys（以環境變數形式）分別對應到相同的模型，並說明 LiteLLM 是如何進行請求分流的。」
+- **情境 2：自動容錯備援（Failover / Fallback）**
+  * *提示詞*：「請幫我設計一個具備容錯備援機制的 LiteLLM Proxy 設定。當主模型 `openai/gpt-4o` 發生 Rate Limit 或 Service Unavailable 時，能自動 fallback 到備用模型 `anthropic/claude-3-5-sonnet`，並 provide 測試此備援機制的 Python 範例。」
+- **情境 3：重試與逾時控制 (Retries & Timeout)**
+  * *提示詞*：「我需要在 LiteLLM Router 設定中加入全域的重試（Retries）與逾時（Timeout）限制。請修改我的 `config.yaml`，設定連線逾時為 10 秒，且在遇到 5xx 錯誤時自動重試 3 次，並在 Python SDK 端示範如何也設定個別呼叫的 timeout。」

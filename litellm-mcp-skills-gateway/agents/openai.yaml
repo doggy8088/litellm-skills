@@ -1,0 +1,4 @@
+interface:
+  display_name: "LiteLLM MCP Skills Gateway"
+  short_description: "Secure LiteLLM MCP agent access"
+  default_prompt: "Use $litellm-mcp-skills-gateway to review MCP tools, permissions, Skills Gateway use, and rollback controls."

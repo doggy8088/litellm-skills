@@ -1,0 +1,4 @@
+interface:
+  display_name: "LiteLLM Routing Reliability"
+  short_description: "Tune LiteLLM routing reliability"
+  default_prompt: "Use $litellm-routing-reliability to review a LiteLLM routing matrix, fallbacks, retries, and tests."

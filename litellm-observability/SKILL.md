@@ -15,7 +15,7 @@ description: 設定或審查 LiteLLM callbacks、logging、OpenTelemetry、reque
 6. 測試成功、provider error、timeout、budget exceeded、fallback 與 guardrail blocked。
 7. 交付查詢方式、重現步驟與實際 trace 證據。
 
-需要安全設定、OpenTelemetry 注意事項與實驗規格時，讀取 [實驗與參考](references/guide.md)。
+需要安全設定、OpenTelemetry 注意事項與實驗規格時，讀取 [實驗與參考](references/guide.md)；涉及 SpendLogs 封存、保留或用量 UI 時，讀取 [SpendLogs 與用量](references/spendlogs-and-usage.md)。
 
 ## 安全底線
 

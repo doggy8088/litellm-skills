@@ -1,0 +1,4 @@
+interface:
+  display_name: "LiteLLM Proxy Gateway"
+  short_description: "Design LiteLLM proxy gateways"
+  default_prompt: "Use $litellm-proxy-gateway to design a secure LiteLLM Proxy config and verification flow."

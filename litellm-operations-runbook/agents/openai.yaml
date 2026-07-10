@@ -1,0 +1,4 @@
+interface:
+  display_name: "LiteLLM Operations Runbook"
+  short_description: "Run LiteLLM operations safely"
+  default_prompt: "Use $litellm-operations-runbook to plan a dry-run-first LiteLLM backup, restore, or cleanup operation."

@@ -15,7 +15,7 @@ description: 設計或審查 LiteLLM MCP Gateway、MCP permissions、toolsets、
 6. 外部 skill 固定至已審查 commit SHA，記錄內容雜湊與所需權限。
 7. 在隔離 Proxy 測試 list、allowed call、denied call、來源更新與撤銷。
 
-需要供應鏈規則、Skills Gateway 流程與實驗規格時，讀取 [實驗與參考](references/guide.md)。
+需要供應鏈規則、Skills Gateway 流程與實驗規格時，讀取 [實驗與參考](references/guide.md)；將 agent 接到 live-proxy 管理流程時，讀取 [Agent Gateway 安全](references/agent-gateway-safety.md)。
 
 ## 安全底線
 

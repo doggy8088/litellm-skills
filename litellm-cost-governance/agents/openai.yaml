@@ -1,0 +1,4 @@
+interface:
+  display_name: "LiteLLM Cost Governance"
+  short_description: "Govern LiteLLM keys and spend"
+  default_prompt: "Use $litellm-cost-governance to plan virtual keys, budgets, model allowlists, and usage reports."

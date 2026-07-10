@@ -1,0 +1,20 @@
+# Local reference and generated material
+ref/
+backups/
+*.dump
+*.tar.gz
+*.zip
+*.har
+
+# LiteLLM secrets and generated operational data
+.env
+Key_List*.csv
+userList.csv
+key*Results.csv
+update*Results.csv
+keyUsageResults.*
+userList_updated.csv
+
+# Runtime caches
+__pycache__/
+*.pyc

@@ -15,7 +15,7 @@ description: 設定或審查 LiteLLM 內容安全、PII masking、prompt injecti
 6. 明確定義 provider error 與 guardrail error 的 fail-open 或 fail-closed 行為。
 7. 測試 allow、deny、mask、rewrite、provider error 與 guardrail error。
 
-需要 tool permission config、PII config 與測試規格時，讀取 [實驗與參考](references/guide.md)。
+需要 tool permission config、PII config 與測試規格時，讀取 [實驗與參考](references/guide.md)；涉及 custom hook、請求改寫或維運資料清理時，讀取 [Custom hook 與機密衛生](references/custom-hooks-and-secret-hygiene.md)。
 
 ## 安全底線
 

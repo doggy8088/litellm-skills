@@ -88,8 +88,8 @@ def validate_fences(path: Path, text: str, errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     skills = sorted(ROOT.glob("litellm-*/SKILL.md"))
-    if len(skills) != 7:
-        errors.append(f"預期 7 個 skills，實際找到 {len(skills)} 個")
+    if len(skills) != 8:
+        errors.append(f"預期 8 個 skills，實際找到 {len(skills)} 個")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for path in [ROOT / "README.md", *skills]:

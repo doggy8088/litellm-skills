@@ -15,7 +15,7 @@ description: 使用 LiteLLM Python SDK 建立或審查 completion、streaming、
 6. Streaming 必須處理空 delta、中途失敗及取消。
 7. 執行離線測試；只有使用者明確允許時才呼叫付費 provider。
 
-需要程式範例、測試案例或版本注意事項時，讀取 [實驗與參考](references/guide.md)。
+需要程式範例、測試案例或版本注意事項時，讀取 [實驗與參考](references/guide.md)；測試 proxy-compatible client 或混合 endpoint mode 時，讀取 [本機 client 測試模式](references/local-client-test-patterns.md)。
 
 ## 安全底線
 

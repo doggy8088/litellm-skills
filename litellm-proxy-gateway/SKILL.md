@@ -15,7 +15,7 @@ description: 建立或審查 LiteLLM Proxy 的基礎拓樸、model alias、confi
 6. 依需求載入 `litellm-routing-reliability`、`litellm-cost-governance`、`litellm-observability`、`litellm-guardrails-safety` 或 `litellm-mcp-skills-gateway`。
 7. 交付開發、測試、正式環境差異及驗證證據。
 
-需要 config、client smoke test 或版本注意事項時，讀取 [實驗與參考](references/guide.md)。
+需要 config、client smoke test 或版本注意事項時，讀取 [實驗與參考](references/guide.md)；涉及 Docker Compose、Postgres 或 custom callback 掛載時，讀取 [本機 Proxy 部署](references/local-proxy-deployment.md)。
 
 ## 安全底線
 

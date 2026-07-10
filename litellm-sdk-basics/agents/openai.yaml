@@ -1,0 +1,4 @@
+interface:
+  display_name: "LiteLLM SDK Basics"
+  short_description: "Teach direct LiteLLM SDK usage"
+  default_prompt: "Use $litellm-sdk-basics to build a low-cost LiteLLM Python SDK example with safe error handling."

@@ -1,49 +1,42 @@
-# Custom Hooks And Secret Hygiene
+# Custom hook 與機密資料處理
 
-Use this when reviewing proxy callbacks, request rewriting, unsupported payload blocking, or sensitive operational artifacts.
+最後查證日期：2026-07-12。Proxy callback、guardrail mode 與 request schema 可能隨 LiteLLM 版本變動；實作前請重新查核 [Custom Callbacks](https://docs.litellm.ai/docs/observability/custom_callback) 與 [Guardrails](https://docs.litellm.ai/docs/proxy/guardrails/quick_start)。
 
-## Hook Pattern
+## Hook 邊界
 
-The bundled `scripts/custom_hooks/proxy_policy_hook.py` template defines a `CustomLogger` subclass with `async_pre_call_hook`.
+[proxy_policy_hook.py](../scripts/custom_hooks/proxy_policy_hook.py) 只處理一項相容性政策：針對指定模型，阻擋不支援的 `custom_tool_call` input item。
 
-The hook:
+- 阻擋清單由 `LITELLM_BLOCK_CUSTOM_TOOL_CALL_MODELS` 提供；每個值都必須是 client 實際送入 `model` 的 alias／名稱，不是 routing 完成後的 provider deployment 名稱。
+- Hook 不會猜測 alias 到後端的映射。同一 alias 若可能路由到能力不同的後端，應先拆成不同 aliases，再將不相容的 request-visible alias 列入阻擋清單。
+- 命中時回傳 400；其餘 request 保持原樣。
+- Hook 不得設定、補登或改寫 pricing、model alias 或 routing；這些設定必須留在 LiteLLM 原生機制，避免繞過 virtual key allowlist、budget 或 router policy。
 
-- Calls `litellm.register_model()` for custom OpenAI-compatible backend pricing when `LITELLM_CUSTOM_PRICING_JSON` is set.
-- Maps selected user-facing aliases to backend model aliases when `LITELLM_MODEL_ALIAS_MAP_JSON` is set.
-- Blocks Responses API inputs containing `input[].type=custom_tool_call` for models known not to support that replay shape.
-- Reads the blocked model list from `LITELLM_BLOCK_CUSTOM_TOOL_CALL_MODELS`.
-- Raises a FastAPI `HTTPException(status_code=400)` with a clear user-facing error.
-- Returns the modified `data` dict to LiteLLM.
+## 安全規則
 
-## Safe Hook Rules
+- 初始化必須可重複，且 request path 不得註冊或修改 pricing。
+- 避免把 LiteLLM Proxy 內部型別列為必要 import，以降低版本耦合。
+- 不得在 hook 內改寫 model alias 或 router 選擇結果。
+- 對命中政策的 payload 採 fail-closed，錯誤訊息不得回顯 request payload。
+- 測試模組匯入、正常 payload、blocked payload、未列入清單的模型與畸形 input。
 
-- Keep hook initialization idempotent; callbacks may run many times.
-- Validate request shape before rewriting models.
-- Keep model alias maps in configuration when they change often.
-- Avoid hardcoded personal key aliases or allowlists in code.
-- Fail closed for unsupported payloads that can corrupt state or produce misleading model behavior.
-- Add tests for hook import, alias rewrite, blocked payload, and unaffected normal calls.
+## 機密盤點
 
-## Secret Inventory
+LiteLLM 維運 repo 常見敏感資料包括：
 
-Operational LiteLLM repositories often contain several secret-like patterns:
+- `Key_List*.csv` 與結果 CSV 中的 virtual key 或 key hash。
+- Bearer token、SAS query、database URL 與 `.env`。
+- 瀏覽器或 API capture、SpendLogs archive、prompt 與 response。
 
-- Virtual keys in `Key_List*.csv` and generated result CSVs.
-- Hardcoded bearer-token defaults in scripts.
-- SAS URLs/signatures in upload helper scripts.
-- Browser or API captures with request data.
-- Config references to many API-key environment variables.
+不得引用或複製實際值；公開 repo 前，必須清除敏感產物並輪替曾暴露的憑證。
 
-Do not quote or copy these values. If the user wants to publish or share the repository, recommend scrubbing the files and rotating any exposed credentials.
+## Prompt 與 response 保存
 
-## Prompt And Response Storage
+啟用 `store_prompts_in_spend_logs: true` 後，log 與 archive 可能包含完整內容。啟用前必須定義資料分類、保留期限、加密方式與存取權限。
 
-`store_prompts_in_spend_logs: true` means operational logs and archives can contain prompt/response content. Treat spend-log exports as sensitive datasets and set retention deliberately.
+## 審查問題
 
-## Security Review Questions
-
-- What exact condition should block the request?
-- Which identities, teams, or keys can bypass the block, and where is that exception stored?
-- Is the block visible in logs without exposing the sensitive payload?
-- Does the hook behave correctly for chat, responses, image, audio, and embeddings call types?
-- What is the rollback path if the hook breaks production traffic?
+- 哪個精確條件會阻擋 request？
+- 哪些 identity、team 或 key 可套用例外？例外存放在哪裡？
+- Log 能否證明阻擋事件而不暴露 payload？
+- Chat、Responses、image、audio 與 embeddings 是否都維持原始 model？
+- Hook 造成正式流量異常時，如何 rollback？

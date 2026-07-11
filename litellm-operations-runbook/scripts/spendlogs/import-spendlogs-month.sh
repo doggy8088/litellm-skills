@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_DIR="${LITELLM_PROJECT_DIR:-$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)}"
 ENV_FILE="${LITELLM_ENV_FILE:-${PROJECT_DIR}/.env}"
+ARCHIVE_VALIDATOR="${SCRIPT_DIR}/validate-spendlogs-archive.py"
+AGE_IDENTITY="${LITELLM_AGE_IDENTITY_FILE:-}"
+MAX_MEMBER_BYTES="${LITELLM_ARCHIVE_MAX_MEMBER_BYTES:-8589934592}"
+MAX_TOTAL_BYTES="${LITELLM_ARCHIVE_MAX_TOTAL_BYTES:-12884901888}"
 
 ARCHIVE_FILE=""
 DRY_RUN="false"
@@ -49,10 +54,11 @@ SPENDLOG_COLUMNS=(
 
 usage() {
   cat <<EOF
-Usage: ${SCRIPT_NAME} --file <archive.tar.gz> [options]
+Usage: ${SCRIPT_NAME} --file <archive.tar.gz.age> [options]
 
 Options:
-  --file <archive.tar.gz>    LiteLLM_SpendLogs monthly archive to import.
+  --file <archive.tar.gz.age> Encrypted LiteLLM_SpendLogs monthly archive.
+  --age-identity <file>      Explicit age identity file (or LITELLM_AGE_IDENTITY_FILE).
   --dry-run                  Validate and report duplicate/insert counts without importing.
   -h, --help                 Show this help.
 EOF
@@ -79,6 +85,7 @@ cleanup() {
 }
 
 trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
 
 strip_quotes() {
   local s="$1"
@@ -126,10 +133,26 @@ postgres_container_id() {
 
 ensure_prereqs() {
   have docker || die "docker command not found."
-  have tar || die "tar command not found."
+  have python3 || die "python3 command not found."
+  have age || die "age command not found."
   have sha256sum || die "sha256sum command not found."
+  [[ -f "$ARCHIVE_VALIDATOR" ]] || die "archive validator not found: $ARCHIVE_VALIDATOR"
   docker info >/dev/null 2>&1 || die "Docker is not running."
   [[ -f "$PROJECT_DIR/docker-compose.yml" || -f "$PROJECT_DIR/compose.yml" || -f "$PROJECT_DIR/compose.yaml" ]] || die "compose file not found in $PROJECT_DIR."
+}
+
+verify_ciphertext_checksum() {
+  local input="$1" sums expected recorded extra actual line_count
+  sums="${input}.sha256"
+  [[ -f "$sums" && -r "$sums" ]] || die "Required ciphertext checksum is missing: $sums"
+  line_count="$(awk 'NF { count += 1 } END { print count + 0 }' "$sums")"
+  [[ "$line_count" == "1" ]] || die "Ciphertext checksum must contain exactly one non-empty line."
+  IFS=' ' read -r expected recorded extra <"$sums" || die "Could not read ciphertext checksum."
+  [[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] || die "Ciphertext checksum is invalid."
+  recorded="${recorded#\*}"
+  [[ "$recorded" == "$(basename -- "$input")" && -z "${extra:-}" ]] || die "Ciphertext checksum filename does not match the archive."
+  actual="$(sha256sum "$input" | awk '{print $1}')"
+  [[ "${actual,,}" == "${expected,,}" ]] || die "Ciphertext checksum verification failed."
 }
 
 columns_sql() {
@@ -148,20 +171,14 @@ columns_sql() {
 
 manifest_get() {
   local key="$1" manifest_file="$2"
-  grep -E "^${key}=" "$manifest_file" | head -n 1 | cut -d= -f2-
-}
-
-verify_sha256() {
-  local label="$1" file="$2" expected="$3"
-  local actual
-  [[ -f "$file" ]] || die "Missing ${label}: $file"
-  [[ -n "$expected" ]] || die "Missing expected sha256 for ${label}."
-  actual="$(sha256sum "$file" | awk '{print $1}')"
-  [[ "$actual" == "$expected" ]] || die "${label} checksum mismatch. expected=${expected}, actual=${actual}"
+  local count
+  count="$(grep -c -E "^${key}=" "$manifest_file" || true)"
+  [[ "$count" == "1" ]] || die "Manifest key ${key} must occur exactly once."
+  grep -E "^${key}=" "$manifest_file" | cut -d= -f2-
 }
 
 run_import_sql() {
-  local db_user="$1" db_name="$2" container_data_file="$3" expected_count="$4" mode="$5"
+  local db_user="$1" db_name="$2" container_data_file="$3" container_request_ids_file="$4" expected_count="$5" mode="$6"
   local columns stage_columns output stats
 
   columns="$(columns_sql)"
@@ -170,13 +187,19 @@ run_import_sql() {
   if [[ "$mode" == "dry-run" ]]; then
     output="$(compose exec -T postgres psql -X -q -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name" -At -F '|' <<SQL
 BEGIN;
+SET LOCAL TIME ZONE 'UTC';
 CREATE TEMP TABLE _spendlogs_import_stage (
   LIKE public."LiteLLM_SpendLogs" INCLUDING DEFAULTS INCLUDING GENERATED
 ) ON COMMIT DROP;
+CREATE TEMP TABLE _spendlogs_archive_ids (
+  request_id text PRIMARY KEY
+) ON COMMIT DROP;
 \copy _spendlogs_import_stage(${columns}) FROM '${container_data_file}' WITH (FORMAT csv, HEADER true);
+\copy _spendlogs_archive_ids(request_id) FROM '${container_request_ids_file}' WITH (FORMAT csv, HEADER true);
 DO \$\$
 DECLARE
   stage_count bigint;
+  id_count bigint;
   duplicate_count bigint;
 BEGIN
   SELECT COUNT(*) INTO stage_count FROM _spendlogs_import_stage;
@@ -184,9 +207,30 @@ BEGIN
     RAISE EXCEPTION 'archive row count mismatch: expected %, got %', ${expected_count}, stage_count;
   END IF;
 
+  SELECT COUNT(*) INTO id_count FROM _spendlogs_archive_ids;
+  IF id_count <> ${expected_count} THEN
+    RAISE EXCEPTION 'archive request ID count mismatch: expected %, got %', ${expected_count}, id_count;
+  END IF;
+
   SELECT COUNT(*) - COUNT(DISTINCT request_id) INTO duplicate_count FROM _spendlogs_import_stage;
   IF duplicate_count <> 0 THEN
     RAISE EXCEPTION 'archive contains duplicate request_id rows: %', duplicate_count;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM _spendlogs_import_stage stage
+    WHERE NOT EXISTS (
+      SELECT 1 FROM _spendlogs_archive_ids ids WHERE ids.request_id = stage.request_id
+    )
+  ) OR EXISTS (
+    SELECT 1
+    FROM _spendlogs_archive_ids ids
+    WHERE NOT EXISTS (
+      SELECT 1 FROM _spendlogs_import_stage stage WHERE stage.request_id = ids.request_id
+    )
+  ) THEN
+    RAISE EXCEPTION 'request_ids.csv does not match the data CSV request_id set';
   END IF;
 END
 \$\$;
@@ -204,13 +248,19 @@ SQL
   else
     output="$(compose exec -T postgres psql -X -q -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name" -At -F '|' <<SQL
 BEGIN;
+SET LOCAL TIME ZONE 'UTC';
 CREATE TEMP TABLE _spendlogs_import_stage (
   LIKE public."LiteLLM_SpendLogs" INCLUDING DEFAULTS INCLUDING GENERATED
 ) ON COMMIT DROP;
+CREATE TEMP TABLE _spendlogs_archive_ids (
+  request_id text PRIMARY KEY
+) ON COMMIT DROP;
 \copy _spendlogs_import_stage(${columns}) FROM '${container_data_file}' WITH (FORMAT csv, HEADER true);
+\copy _spendlogs_archive_ids(request_id) FROM '${container_request_ids_file}' WITH (FORMAT csv, HEADER true);
 DO \$\$
 DECLARE
   stage_count bigint;
+  id_count bigint;
   duplicate_count bigint;
 BEGIN
   SELECT COUNT(*) INTO stage_count FROM _spendlogs_import_stage;
@@ -218,9 +268,30 @@ BEGIN
     RAISE EXCEPTION 'archive row count mismatch: expected %, got %', ${expected_count}, stage_count;
   END IF;
 
+  SELECT COUNT(*) INTO id_count FROM _spendlogs_archive_ids;
+  IF id_count <> ${expected_count} THEN
+    RAISE EXCEPTION 'archive request ID count mismatch: expected %, got %', ${expected_count}, id_count;
+  END IF;
+
   SELECT COUNT(*) - COUNT(DISTINCT request_id) INTO duplicate_count FROM _spendlogs_import_stage;
   IF duplicate_count <> 0 THEN
     RAISE EXCEPTION 'archive contains duplicate request_id rows: %', duplicate_count;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM _spendlogs_import_stage stage
+    WHERE NOT EXISTS (
+      SELECT 1 FROM _spendlogs_archive_ids ids WHERE ids.request_id = stage.request_id
+    )
+  ) OR EXISTS (
+    SELECT 1
+    FROM _spendlogs_archive_ids ids
+    WHERE NOT EXISTS (
+      SELECT 1 FROM _spendlogs_import_stage stage WHERE stage.request_id = ids.request_id
+    )
+  ) THEN
+    RAISE EXCEPTION 'request_ids.csv does not match the data CSV request_id set';
   END IF;
 END
 \$\$;
@@ -258,7 +329,13 @@ SQL
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --file)
-      ARCHIVE_FILE="${2:-}"
+      [[ $# -ge 2 ]] || die "--file requires a value."
+      ARCHIVE_FILE="$2"
+      shift 2
+      ;;
+    --age-identity)
+      [[ $# -ge 2 ]] || die "--age-identity requires a value."
+      AGE_IDENTITY="$2"
       shift 2
       ;;
     --dry-run)
@@ -277,6 +354,16 @@ done
 
 [[ -n "$ARCHIVE_FILE" ]] || die "--file is required."
 [[ -f "$ARCHIVE_FILE" ]] || die "Archive file not found: $ARCHIVE_FILE"
+[[ "${ARCHIVE_FILE,,}" == *.tar.gz.age ]] || die "Only .tar.gz.age archives are accepted."
+[[ -n "$AGE_IDENTITY" ]] || die "set LITELLM_AGE_IDENTITY_FILE or pass --age-identity."
+[[ -f "$AGE_IDENTITY" && -r "$AGE_IDENTITY" ]] || die "Age identity file is not readable."
+[[ "$MAX_MEMBER_BYTES" =~ ^[1-9][0-9]*$ ]] || die "LITELLM_ARCHIVE_MAX_MEMBER_BYTES must be positive."
+[[ "$MAX_TOTAL_BYTES" =~ ^[1-9][0-9]*$ ]] || die "LITELLM_ARCHIVE_MAX_TOTAL_BYTES must be positive."
+((MAX_TOTAL_BYTES >= MAX_MEMBER_BYTES)) || die "Archive total-size limit must be at least the member-size limit."
+ARCHIVE_DIR="$(cd -- "$(dirname -- "$ARCHIVE_FILE")" && pwd -P)"
+ARCHIVE_FILE="${ARCHIVE_DIR}/$(basename -- "$ARCHIVE_FILE")"
+AGE_IDENTITY_DIR="$(cd -- "$(dirname -- "$AGE_IDENTITY")" && pwd -P)"
+AGE_IDENTITY="${AGE_IDENTITY_DIR}/$(basename -- "$AGE_IDENTITY")"
 
 init_compose
 ensure_prereqs
@@ -288,37 +375,47 @@ PG_CID="$(postgres_container_id)"
 [[ -n "$PG_CID" ]] || die "postgres container is not running."
 
 WORK_DIR="$(mktemp -d)"
-tar -xzf "$ARCHIVE_FILE" -C "$WORK_DIR"
+chmod 700 "$WORK_DIR"
+DECRYPTED_ARCHIVE="${WORK_DIR}/archive.tar.gz"
+verify_ciphertext_checksum "$ARCHIVE_FILE"
+age --decrypt --identity "$AGE_IDENTITY" --output "$DECRYPTED_ARCHIVE" "$ARCHIVE_FILE"
+[[ -s "$DECRYPTED_ARCHIVE" ]] || die "age produced an empty plaintext archive."
+chmod 600 "$DECRYPTED_ARCHIVE"
+EXTRACT_DIR="${WORK_DIR}/archive"
+python3 "$ARCHIVE_VALIDATOR" \
+  --max-member-bytes "$MAX_MEMBER_BYTES" \
+  --max-total-bytes "$MAX_TOTAL_BYTES" \
+  "$DECRYPTED_ARCHIVE" "$EXTRACT_DIR" >/dev/null
+rm -f "$DECRYPTED_ARCHIVE"
+DECRYPTED_ARCHIVE=""
 
-MANIFEST_FILE="${WORK_DIR}/manifest.env"
+MANIFEST_FILE="${EXTRACT_DIR}/manifest.env"
 [[ -f "$MANIFEST_FILE" ]] || die "manifest.env not found in archive."
 
 ARCHIVE_FORMAT="$(manifest_get archive_format "$MANIFEST_FILE")"
 MONTH="$(manifest_get month "$MANIFEST_FILE")"
 ROW_COUNT="$(manifest_get row_count "$MANIFEST_FILE")"
 DATA_REL="$(manifest_get data_file "$MANIFEST_FILE")"
-DATA_SHA256="$(manifest_get data_sha256 "$MANIFEST_FILE")"
 REQUEST_IDS_REL="$(manifest_get request_ids_file "$MANIFEST_FILE")"
-REQUEST_IDS_SHA256="$(manifest_get request_ids_sha256 "$MANIFEST_FILE")"
 
-[[ "$ARCHIVE_FORMAT" == "litellm_spendlogs_month_v1" ]] || die "Unsupported archive format: ${ARCHIVE_FORMAT:-missing}"
+[[ "$ARCHIVE_FORMAT" == "litellm_spendlogs_month_v2" ]] || die "Unsupported archive format: ${ARCHIVE_FORMAT:-missing}"
 [[ "$ROW_COUNT" =~ ^[0-9]+$ ]] || die "Invalid row_count in manifest: ${ROW_COUNT:-missing}"
-[[ -n "$DATA_REL" ]] || die "Missing data_file in manifest."
-[[ -n "$REQUEST_IDS_REL" ]] || die "Missing request_ids_file in manifest."
+[[ "$DATA_REL" == "data/LiteLLM_SpendLogs.csv" ]] || die "Invalid data_file in manifest."
+[[ "$REQUEST_IDS_REL" == "data/request_ids.csv" ]] || die "Invalid request_ids_file in manifest."
 
-DATA_FILE="${WORK_DIR}/${DATA_REL}"
-REQUEST_IDS_FILE="${WORK_DIR}/${REQUEST_IDS_REL}"
-verify_sha256 "data CSV" "$DATA_FILE" "$DATA_SHA256"
-verify_sha256 "request_ids CSV" "$REQUEST_IDS_FILE" "$REQUEST_IDS_SHA256"
+DATA_FILE="${EXTRACT_DIR}/${DATA_REL}"
+REQUEST_IDS_FILE="${EXTRACT_DIR}/${REQUEST_IDS_REL}"
 
 CONTAINER_IMPORT_DIR="$(compose exec -T postgres mktemp -d /tmp/litellm_spendlogs_import_XXXXXX | tr -d '\r')"
 [[ -n "$CONTAINER_IMPORT_DIR" ]] || die "Could not create container temp directory."
 CONTAINER_DATA_FILE="${CONTAINER_IMPORT_DIR}/LiteLLM_SpendLogs.csv"
+CONTAINER_REQUEST_IDS_FILE="${CONTAINER_IMPORT_DIR}/request_ids.csv"
 docker cp "$DATA_FILE" "${PG_CID}:${CONTAINER_DATA_FILE}"
+docker cp "$REQUEST_IDS_FILE" "${PG_CID}:${CONTAINER_REQUEST_IDS_FILE}"
 
 if [[ "$DRY_RUN" == "true" ]]; then
   log "Dry run only. Archive will be validated but no rows will be imported."
-  STATS="$(run_import_sql "$DB_USER" "$DB_NAME" "$CONTAINER_DATA_FILE" "$ROW_COUNT" "dry-run")"
+  STATS="$(run_import_sql "$DB_USER" "$DB_NAME" "$CONTAINER_DATA_FILE" "$CONTAINER_REQUEST_IDS_FILE" "$ROW_COUNT" "dry-run")"
   IFS='|' read -r ARCHIVE_ROWS EXISTING_DUPLICATES WOULD_INSERT WOULD_SKIP <<< "$STATS"
   printf 'month=%s\n' "$MONTH"
   printf 'archive_rows=%s\n' "$ARCHIVE_ROWS"
@@ -329,7 +426,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 
 log "Importing LiteLLM_SpendLogs archive: $ARCHIVE_FILE"
-STATS="$(run_import_sql "$DB_USER" "$DB_NAME" "$CONTAINER_DATA_FILE" "$ROW_COUNT" "import")"
+STATS="$(run_import_sql "$DB_USER" "$DB_NAME" "$CONTAINER_DATA_FILE" "$CONTAINER_REQUEST_IDS_FILE" "$ROW_COUNT" "import")"
 IFS='|' read -r ARCHIVE_ROWS EXISTING_DUPLICATES INSERTED_ROWS SKIPPED_DUPLICATES <<< "$STATS"
 
 printf 'month=%s\n' "$MONTH"

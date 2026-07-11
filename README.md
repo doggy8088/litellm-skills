@@ -18,6 +18,7 @@
 
 ```sh
 python scripts/validate_skills.py
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 外部連結由每週排程執行 `python scripts/check_links.py`；一般 pull request 不受暫時性網路錯誤影響。
@@ -33,9 +34,9 @@ python scripts/validate_skills.py
 | `litellm-routing-reliability` | Router、load balancing、retry、timeout、fallback、health | 預算政策與 trace 後端 |
 | `litellm-cost-governance` | Virtual keys、budgets、rate limits、成本歸因 | 一般 Proxy 拓樸與觀測平台 |
 | `litellm-observability` | Callbacks、logging、OpenTelemetry、trace 與除錯 | 存取控制與 guardrail 規則 |
-| `litellm-guardrails-safety` | 內容、PII、tool、MCP guardrails 與 call hooks | MCP server 註冊與一般 key 預算 |
+| `litellm-guardrails-safety` | 內容、PII、tool、MCP guardrails、call hooks 與機密衛生 | MCP server 註冊與一般 key 預算 |
 | `litellm-mcp-skills-gateway` | MCP Gateway、permissions、toolsets、Skills Gateway | 一般 LLM tool calling 與 guardrail 實作細節 |
-| `litellm-operations-runbook` | 備份還原、SpendLogs 封存、批次 key 維護與用量工具 | 一般成本政策與觀測平台設定 |
+| `litellm-operations-runbook` | 備份還原與 SpendLogs 封存／復原 | Virtual key 政策與 live proxy 管理 |
 
 複合任務可同時使用多個技能：先以 `litellm-proxy-gateway` 決定基礎拓樸，再依需求加入可靠性、成本、觀測、安全、MCP 或維運專門技能。
 
@@ -55,7 +56,7 @@ python scripts/validate_skills.py
 
 完成七個核心實驗後，使用 [跨技能整合實驗](curriculum/capstone.md) 驗證端到端治理能力。
 
-`litellm-operations-runbook` 是實際維運工作的延伸路徑，不列為第八個先備階段；需要備份、資料封存或批次管理時再載入。
+`litellm-operations-runbook` 是實際維運工作的延伸路徑，不列為第八個先備階段；需要備份、資料封存或隔離還原演練時再載入。
 
 * * *
 
@@ -70,6 +71,7 @@ python scripts/validate_skills.py
 - 需要版本、模型、價格、功能或授權方案資訊時，重新查核 LiteLLM 官方文件或官方 GitHub。
 - 不提交 API key、proxy master key、virtual key、資料庫連線密碼或觀測平台 secret。
 - 將 key CSV、SpendLogs 封存檔、備份與用量報告視為敏感產物，不提交或公開分享。
+- 備份與 SpendLogs 封存離開隔離主機前先做 authenticated encryption；加密 identity 與 archive 分開保存。
 - 學生練習使用本機或隔離 proxy、測試 key、低成本模型及極小預算。
 - 不以用戶端可控制的 metadata 作為可信任的授權或預算邊界。
 - 管理型 skills 與外部 Git 來源固定到已審查的 commit SHA；更新後重新審查。

@@ -4,6 +4,8 @@ backups/
 *.dump
 *.tar.gz
 *.zip
+*.age
+*.sha256
 *.har
 
 # LiteLLM secrets and generated operational data
@@ -18,3 +20,23 @@ userList_updated.csv
 # Runtime caches
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+testResults.xml
+*.trx
+
+# Additional local secret files
+.env.*
+!.env.example
+*.pem
+*.key
+.local-secrets/
+*.secret.json
+
+# Operational reports and temporary restore data
+*UsageResults.json
+*UsageResults.csv
+updateBudgetResults.csv
+updateModelsResults.csv
+restore-data/

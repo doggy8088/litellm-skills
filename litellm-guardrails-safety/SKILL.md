@@ -1,6 +1,6 @@
 ---
 name: litellm-guardrails-safety
-description: 設定或審查 LiteLLM 內容安全、PII masking、prompt injection、tool permission、MCP guardrails 與 call hooks。當任務需要修改、拒絕或限制 LLM／tool／MCP 請求時使用；MCP server 註冊與一般 virtual-key 預算改用對應專門技能。
+description: 設定或審查 LiteLLM 內容安全、PII masking、prompt injection、tool permission、MCP guardrails、call hooks 與機密衛生。當任務需要修改、拒絕或限制 LLM／tool／MCP 請求，或盤點、清理意外暴露的 credential 與敏感產物時使用；MCP server 註冊與一般 virtual-key 預算改用對應專門技能。
 ---
 
 # LiteLLM Guardrails Safety

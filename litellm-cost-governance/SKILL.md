@@ -15,7 +15,7 @@ description: 設計或審查 LiteLLM virtual keys、spend tracking、budgets、r
 6. 測試超額、到期、未授權模型及撤銷後行為。
 7. 課程結束撤銷 key，保存不含 secret 的稽核證據。
 
-需要 key payload、安全設定與核心實驗時，讀取 [實驗與參考](references/guide.md)；涉及 virtual key 批次生命週期、預算更新或用量報告時，讀取 [Virtual key 維運](references/virtual-key-operations.md)。
+需要 key payload、安全設定與核心實驗時，讀取 [實驗與參考](references/guide.md)；涉及 virtual key 生命週期、輪替或批次變更時，讀取 [Virtual key 維運](references/virtual-key-operations.md)，並優先使用已審查版本的官方 LiteLLM skills／API。
 
 ## 安全底線
 

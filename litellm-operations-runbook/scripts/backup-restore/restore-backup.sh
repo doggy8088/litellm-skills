@@ -1,370 +1,523 @@
 #!/usr/bin/env bash
+# Disable command tracing before handling an Azure SAS credential.
+set +x
 set -euo pipefail
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-PROJECT_DIR="${LITELLM_PROJECT_DIR:-$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)}"
-ENV_FILE="${PROJECT_DIR}/.env"
-BACKUPS_DIR="${PROJECT_DIR}/backups"
-POSTGRES_IMAGE="postgres:16-alpine"
-
-AZURE_SAS_URL="${AZURE_BACKUP_SAS_URL:-}"
-PG_USER="${PG_USER:-}"
-PG_PASSWORD="${PG_PASSWORD:-}"
-PG_DB="${PG_DB:-}"
+umask 077
 
 SCRIPT_NAME="$(basename "$0")"
-RESTORE_KEEP="false"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+ZIP_PREPARER="${SCRIPT_DIR}/prepare-logical-backup.py"
+PROJECT_DIR="${LITELLM_PROJECT_DIR:-$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)}"
+BACKUPS_DIR="${LITELLM_BACKUPS_DIR:-${PROJECT_DIR}/backups}"
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-postgres:16-alpine}"
+RESTORE_PG_USER="${PG_USER:-litellm}"
+RESTORE_PG_DB="${PG_DB:-litellm_restore}"
+AZURE_SAS_URL="${AZURE_BACKUP_SAS_URL:-}"
+AGE_IDENTITY="${LITELLM_AGE_IDENTITY_FILE:-}"
+MAX_MEMBER_BYTES="${LITELLM_RESTORE_MAX_MEMBER_BYTES:-8589934592}"
+MAX_TOTAL_BYTES="${LITELLM_RESTORE_MAX_TOTAL_BYTES:-9663676416}"
+
+KEEP_DATA=false
+RESTORE_SUCCEEDED=false
+WORK_DIR=""
 RESTORE_CONTAINER=""
-RESTORE_DATA_DIR=""
+RESTORE_CONTAINER_ID=""
+RESTORE_CONTAINER_CREATED=false
+RESTORE_VOLUME=""
+RESTORE_VOLUME_CREATED=false
+RUN_ID=""
 
-usage() {
-  cat <<EOF
-Usage: ${SCRIPT_NAME} --date <YYYY-MM-DD> [options]
-
-  --date <YYYY-MM-DD>        Restore target date
-  --source <local|azure>      Source type (default: azure)
-  --file <path>               Restore directly from this local backup file
-  --blob-name <name>          Restore a specific Azure blob
-  --sas <url>                 Azure container SAS URL (or AZURE_BACKUP_SAS_URL env var)
-  --local-dir <dir>           Local backup search dir (default: backups)
-  --keep-data                 Keep temp DB + data (default: auto-clean)
-  --verify-only               Same as --keep-data
-  --port <n>                  Host port for temp restore DB (default: 55432)
-  -h, --help                 Show this help
-EOF
+container_owned_by_run() {
+  local actual
+  actual="$(docker inspect --format '{{ index .Config.Labels "litellm.restore.run" }}' \
+    "$RESTORE_CONTAINER_ID" 2>/dev/null || true)"
+  [[ -n "$RUN_ID" && "$actual" == "$RUN_ID" ]]
 }
 
-die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-log() { printf '[%s] %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$*"; }
-
-have() { command -v "$1" >/dev/null 2>&1; }
-
-strip_quotes() {
-  local s="$1"
-  if [[ "$s" == \"*\" && "$s" == *\" ]]; then
-    s="${s:1:${#s}-2}"
-  elif [[ "$s" == \'*\' && "$s" == *\' ]]; then
-    s="${s:1:${#s}-2}"
-  fi
-  printf '%s' "$s"
-}
-
-dotenv_get() {
-  local key="$1" file="$2"
-  [[ -f "$file" ]] || return 1
-  local line value
-  line="$(grep -E "^[[:space:]]*${key}=" "$file" | head -n 1 || true)"
-  [[ -n "$line" ]] || return 1
-  value="${line#*=}"
-  value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-  strip_quotes "$value"
-}
-
-load_defaults() {
-  PG_USER="$(dotenv_get POSTGRES_USER "$ENV_FILE" || printf '%s' "${PG_USER:-litellm}")"
-  PG_PASSWORD="$(dotenv_get POSTGRES_PASSWORD "$ENV_FILE" || printf '%s' "${PG_PASSWORD:-litellm_password_change_me}")"
-  PG_DB="$(dotenv_get POSTGRES_DB "$ENV_FILE" || printf '%s' "${PG_DB:-litellm}")"
-  if [[ -z "$AZURE_SAS_URL" ]]; then
-    AZURE_SAS_URL="$(dotenv_get AZURE_BACKUP_SAS_URL "$ENV_FILE" || printf '%s' "")"
-  fi
-}
-
-date_key() { date -u -d "$1" +'%Y%m%d'; }
-
-extract_date_from_name() {
-  local name="$1"
-  if [[ "$name" =~ backup_(full|incr)_([0-9]{8}) ]]; then
-    printf '%s\n' "${BASH_REMATCH[2]}"
-  elif [[ "$name" =~ backup_([0-9]{8}) ]]; then
-    printf '%s\n' "${BASH_REMATCH[1]}"
-  else
-    printf '\n'
-  fi
-}
-
-set_cleanup() {
-  RESTORE_KEEP="$1"
-  RESTORE_CONTAINER="$2"
-  RESTORE_DATA_DIR="$3"
+volume_owned_by_run() {
+  local actual
+  actual="$(docker volume inspect --format '{{ index .Labels "litellm.restore.run" }}' \
+    "$RESTORE_VOLUME" 2>/dev/null || true)"
+  [[ -n "$RUN_ID" && "$actual" == "$RUN_ID" ]]
 }
 
 cleanup() {
-  if [[ "$RESTORE_KEEP" == "false" ]]; then
-    [[ -n "${RESTORE_CONTAINER}" ]] && docker rm -f "${RESTORE_CONTAINER}" >/dev/null 2>&1 || true
-    [[ -n "${RESTORE_DATA_DIR}" ]] && rm -rf "${RESTORE_DATA_DIR}"
-  fi
-}
+  local status=$?
 
+  if [[ "$KEEP_DATA" != true || "$RESTORE_SUCCEEDED" != true ]]; then
+    if [[ "$RESTORE_CONTAINER_CREATED" == true && -n "$RESTORE_CONTAINER_ID" ]] && \
+      command -v docker >/dev/null 2>&1 && container_owned_by_run; then
+      docker rm -f "$RESTORE_CONTAINER_ID" >/dev/null 2>&1 || true
+    fi
+    if [[ "$RESTORE_VOLUME_CREATED" == true && -n "$RESTORE_VOLUME" ]] && \
+      command -v docker >/dev/null 2>&1 && volume_owned_by_run; then
+      docker volume rm -f "$RESTORE_VOLUME" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
+    rm -rf -- "$WORK_DIR"
+  fi
+
+  return "$status"
+}
 trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
 
-wait_for_db() {
-  local container="$1" user="$2" db="$3" pass="$4"
-  local i=0
-  while ((i < 90)); do
-    if docker exec -e PGPASSWORD="$pass" "$container" pg_isready -U "$user" -d "$db" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 2
-    i=$((i+1))
-  done
-  docker logs "$container" >&2 || true
-  die "PostgreSQL did not become ready."
+usage() {
+  cat <<EOF
+Usage:
+  ${SCRIPT_NAME} --source local --file <backup.zip.age|backup.dump.age|backup.sql.age> [options]
+  ${SCRIPT_NAME} --source local --date <YYYY-MM-DD> [options]
+  ${SCRIPT_NAME} --source azure --blob-name <name.zip.age|name.dump.age|name.sql.age> [options]
+  ${SCRIPT_NAME} --source azure --date <YYYY-MM-DD> [options]
+
+Options:
+  --source <local|azure>  Backup source (inferred from --file/--blob-name;
+                           otherwise defaults to azure for compatibility)
+  --file <path>           Explicit encrypted local logical backup
+  --date <YYYY-MM-DD>     Select the latest standard backup from this UTC date
+  --blob-name <name>      Explicit Azure .zip.age/.dump.age/.sql.age blob
+  --sas <url>             HTTPS container SAS URL (prefer AZURE_BACKUP_SAS_URL)
+  --age-identity <file>   Explicit age identity file (or LITELLM_AGE_IDENTITY_FILE)
+  --local-dir <dir>       Local date-search directory (default: ${BACKUPS_DIR})
+  --port <n>              Loopback port for the temporary DB (default: 55432)
+  --verify-only           Restore, query, and clean up (the default lifecycle)
+  --keep-data             Explicitly keep the successful container and Docker volume
+  -h, --help              Show this help
+
+Only age-encrypted logical pg_dump inputs with a detached ciphertext checksum
+are supported. Physical base backups, incremental archives, WAL replay, and
+plaintext backup inputs are intentionally unsupported.
+EOF
 }
 
-download_blob() {
-  local sas="$1" blob="$2" out_file="$3"
-  local base="${sas%%\?*}"
-  local query=""
-  if [[ "$sas" == *\?* ]]; then
-    query="${sas#*\?}"
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+log() {
+  printf '[%s] %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+require_value() {
+  local option="$1" count="$2"
+  ((count >= 2)) || die "${option} requires a value"
+}
+
+sha256_file() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  else
+    die "sha256sum or shasum is required"
   fi
-  local uri="${base}/${blob}"
-  [[ -n "$query" ]] && uri="${uri}?${query}"
-  azcopy copy "$uri" "$out_file"
 }
 
-list_azure_blobs() {
-  local sas="$1"
-  azcopy list "$sas" --recursive --output-level=quiet | grep 'backup_' || true
-}
-
-collect_candidates() {
-  local sas="$1" out_file="$2"
-  local line name key typ
-  : > "$out_file"
-  while IFS= read -r line; do
-    name="${line##*/}"
-    name="${name%%\?*}"
-    [[ "$name" == backup_* ]] || continue
-    key="$(extract_date_from_name "$name")"
-    [[ -z "$key" ]] && continue
-    if [[ "$name" == backup_full_* ]]; then
-      typ="full"
-    elif [[ "$name" == backup_incr_* ]]; then
-      typ="incr"
-    else
-      typ="legacy"
-    fi
-    printf '%s|%s|%s\n' "$typ" "$key" "$name" >> "$out_file"
-  done < <(list_azure_blobs "$sas")
-}
-
-select_chain_for_date() {
-  local target_key="$1" candidates_file="$2"
-  local full_list="$(mktemp)" incr_list="$(mktemp)"
-  local typ key name selected_full="" selected_base="" selected_incr="" line
-  : > "$full_list" ; : > "$incr_list"
-
-  while IFS='|' read -r typ key name; do
-    [[ -z "$key" ]] && continue
-    if ((10#${key} > 10#${target_key})); then
-      continue
-    fi
-    if [[ "$typ" == "full" ]]; then
-      printf '%s|%s\n' "$key" "$name" >> "$full_list"
-    elif [[ "$typ" == "incr" ]]; then
-      printf '%s|%s\n' "$key" "$name" >> "$incr_list"
-    else
-      selected_full="$name"
-      selected_base="$key"
-    fi
-  done < "$candidates_file"
-
-  if [[ -s "$full_list" ]]; then
-    selected_full="$(sort -n -t'|' -k1,1 "$full_list" | tail -n 1 | cut -d'|' -f2)"
-    selected_base="$(sort -n -t'|' -k1,1 "$full_list" | tail -n 1 | cut -d'|' -f1)"
-    while IFS='|' read -r key name; do
-      if ((10#${key} >= 10#${selected_base} && 10#${key} <= 10#${target_key})); then
-        selected_incr+="${selected_incr:+\n}${name}"
-      fi
-    done < <(sort -n -t'|' -k1,1 "$incr_list")
+random_hex() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 24
+  elif command -v od >/dev/null 2>&1; then
+    od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
+  else
+    die "openssl or od is required for a random temporary password"
   fi
+}
 
-  printf '%s|%s\n' "${selected_full:-__NONE__}" "${selected_incr:-__NONE__}"
-  rm -f "$full_list" "$incr_list"
+validate_date() {
+  local value="$1" normalized
+  [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
+  normalized="$(date -u -d "$value" +%F 2>/dev/null)" || return 1
+  [[ "$normalized" == "$value" ]]
+}
+
+supported_path() {
+  case "${1,,}" in
+    *.zip.age|*.dump.age|*.sql.age) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 find_local_for_date() {
-  local target_key="$1" dir="$2"
-  local f key best="" best_key=""
-  while IFS= read -r -d '' p; do
-    key="$(extract_date_from_name "$(basename "$p")")"
-    [[ -z "$key" ]] && continue
-    if [[ -z "$best" || ( "$key" -le "$target_key" && "$key" -gt "$best_key" ) ]]; then
-      best="$p"
-      best_key="$key"
+  local date_key="$1" directory="$2" path base best="" best_base=""
+  [[ -d "$directory" ]] || return 1
+  while IFS= read -r -d '' path; do
+    base="$(basename -- "$path")"
+    if [[ -z "$best" || "$base" > "$best_base" ]]; then
+      best="$path"
+      best_base="$base"
     fi
   done < <(
-    find "$dir" -maxdepth 6 -type f -name 'backup_*.zip' -o -name 'backup_*.dump' -o -name 'backup_*.sql' -o -name 'backup_*.tar' -o -name 'backup_*.tar.gz' 2>/dev/null | sort | tr '\n' '\0'
+    find "$directory" -maxdepth 1 -type f \
+      \( -name "backup_${date_key}_*.zip.age" \
+      -o -name "backup_${date_key}_*.dump.age" \
+      -o -name "backup_${date_key}_*.sql.age" \) -print0 2>/dev/null
   )
+  [[ -n "$best" ]] || return 1
   printf '%s' "$best"
 }
 
-restore_legacy() {
-  local input_file="$1" port="$2" data_dir="$3" keep="$4"
-  local container="litellm-restore-$(date +%s)"
-  local resolved="$input_file"
-  local work
-  work="$(mktemp -d)"
-
-  if [[ "$resolved" == *.zip ]]; then
-    local member
-    member="$(unzip -l "$resolved" | awk '{print $4}' | grep -E '\.dump$|\.sql$' | tail -n 1)"
-    [[ -n "$member" ]] || die "No dump/sql member in $resolved"
-    resolved="$work/restore.dump"
-    unzip -p "$input_file" "$member" > "$resolved"
-  fi
-
-  mkdir -p "$data_dir"
-  docker run -d --name "$container" \
-    -e POSTGRES_DB="$PG_DB" -e POSTGRES_USER="$PG_USER" -e POSTGRES_PASSWORD="$PG_PASSWORD" \
-    -v "${data_dir}:/var/lib/postgresql/data" \
-    -p "${port}:5432" \
-    "$POSTGRES_IMAGE" >/dev/null
-
-  wait_for_db "$container" "$PG_USER" "$PG_DB" "$PG_PASSWORD"
-
-  if [[ "$resolved" == *.dump ]]; then
-    docker cp "$resolved" "$container:/tmp/restore.dump"
-    docker exec -e PGPASSWORD="$PG_PASSWORD" "$container" pg_restore -U "$PG_USER" -d "$PG_DB" --clean --if-exists --no-owner --no-acl /tmp/restore.dump >/dev/null
-  else
-    docker cp "$resolved" "$container:/tmp/restore.sql"
-    docker exec -e PGPASSWORD="$PG_PASSWORD" "$container" psql -U "$PG_USER" -d "$PG_DB" -f /tmp/restore.sql >/dev/null
-  fi
-
-  docker exec -e PGPASSWORD="$PG_PASSWORD" "$container" psql -U "$PG_USER" -d "$PG_DB" -c "select current_database();" >/dev/null
-  log "Restore preview: postgresql://$PG_USER:<password>@localhost:$port/$PG_DB"
-  log "Container: $container"
-  set_cleanup "$keep" "$container" "$data_dir"
-  rm -rf "$work"
+validate_sas_url() {
+  local sas="$1" base query
+  [[ "$sas" != *$'\n'* && "$sas" != *$'\r'* && "$sas" != *'#'* ]] || return 1
+  [[ "$sas" == https://* && "$sas" == *\?* ]] || return 1
+  base="${sas%%\?*}"
+  base="${base%/}"
+  query="${sas#*\?}"
+  [[ "$base" =~ ^https://[^/?#]+/[^/?#]+$ ]] || return 1
+  [[ "&${query}&" == *'&sig='* ]]
 }
 
-restore_chain() {
-  local base_file="$1" incr_dir="$2" date_target="$3" port="$4" data_dir="$5" keep="$6"
-  local container="litellm-restore-chain-$(date +%s)"
-  local wal_dir="${data_dir}/wal"
+azcopy_env() {
+  AZCOPY_LOG_LOCATION="${WORK_DIR}/azcopy-logs" \
+  AZCOPY_JOB_PLAN_LOCATION="${WORK_DIR}/azcopy-plans" \
+    "$@"
+}
 
-  mkdir -p "$data_dir" "$wal_dir"
-  case "$base_file" in
-    *.tar.gz|*.tgz) tar -xzf "$base_file" -C "$data_dir" ;;
-    *.tar) tar -xf "$base_file" -C "$data_dir" ;;
-    *.zip) unzip -q "$base_file" -d "$data_dir" ;;
-    *) die "Unsupported base archive: $base_file" ;;
+list_azure_for_date() {
+  local sas="$1" date_key="$2" raw_list="${WORK_DIR}/azure-list.txt"
+  local line name best=""
+
+  if ! azcopy_env azcopy list "$sas" \
+    --recursive=false --output-level=essential \
+    >"$raw_list" 2>/dev/null; then
+    die "could not list Azure backups"
+  fi
+
+  while IFS= read -r line; do
+    line="${line#INFO: }"
+    name="${line%%;*}"
+    name="${name##*/}"
+    case "${name,,}" in
+      "backup_${date_key}_"*.zip.age|"backup_${date_key}_"*.dump.age|"backup_${date_key}_"*.sql.age)
+        if [[ -z "$best" || "$name" > "$best" ]]; then
+          best="$name"
+        fi
+        ;;
+    esac
+  done <"$raw_list"
+
+  [[ -n "$best" ]] || return 1
+  printf '%s' "$best"
+}
+
+validate_blob_name() {
+  local blob="$1" segment
+  local -a segments=()
+  [[ "$blob" =~ ^[A-Za-z0-9._/-]+$ ]] || return 1
+  [[ "$blob" != /* && "$blob" != */ && "$blob" != *//* ]] || return 1
+  IFS='/' read -r -a segments <<<"$blob"
+  for segment in "${segments[@]}"; do
+    [[ -n "$segment" && "$segment" != . && "$segment" != .. ]] || return 1
+  done
+  supported_path "$blob"
+}
+
+download_azure_blob() {
+  local sas="$1" blob="$2" destination="$3"
+  local base="${sas%%\?*}" query="${sas#*\?}" uri
+  base="${base%/}"
+  uri="${base}/${blob}?${query}"
+
+  if ! azcopy_env azcopy copy "$uri" "$destination" \
+    --from-to=BlobLocal --overwrite=true --log-level=NONE --output-level=quiet \
+    >/dev/null 2>&1; then
+    die "Azure backup download failed"
+  fi
+  [[ -s "$destination" ]] || die "downloaded backup is empty"
+}
+
+verify_detached_checksum() {
+  local input="$1" expected recorded extra actual line_count
+  local sums="${input}.sha256"
+  [[ -f "$sums" && -r "$sums" ]] || die "required detached checksum is missing: $(basename -- "$sums")"
+  line_count="$(awk 'NF { count += 1 } END { print count + 0 }' "$sums")"
+  [[ "$line_count" == 1 ]] || die "detached checksum must contain exactly one non-empty line"
+  IFS=' ' read -r expected recorded extra <"$sums" || die "could not read detached checksum"
+  [[ "$expected" =~ ^[0-9A-Fa-f]{64}$ ]] || die "invalid detached checksum"
+  recorded="${recorded#\*}"
+  [[ "$recorded" == "$(basename -- "$input")" && -z "${extra:-}" ]] || \
+    die "detached checksum filename does not match the encrypted archive"
+  actual="$(sha256_file "$input")"
+  [[ "${actual,,}" == "${expected,,}" ]] || die "detached checksum verification failed"
+  log "Verified encrypted archive checksum"
+}
+
+PREPARED_FILE=""
+PREPARED_KIND=""
+
+prepare_logical_input() {
+  local input="$1" lower="${1,,}" decrypted helper_output prepared_dir raw_size
+
+  verify_detached_checksum "$input"
+
+  case "$lower" in
+    *.dump.age)
+      PREPARED_KIND="dump"
+      decrypted="${WORK_DIR}/decrypted.dump"
+      ;;
+    *.sql.age)
+      PREPARED_KIND="sql"
+      decrypted="${WORK_DIR}/decrypted.sql"
+      ;;
+    *.zip.age)
+      PREPARED_KIND="zip"
+      decrypted="${WORK_DIR}/decrypted.zip"
+      ;;
+    *) die "supported encrypted inputs are .zip.age, .dump.age, and .sql.age" ;;
   esac
 
-  while IFS= read -r -d '' f; do
-    if [[ "$f" == *.tar || "$f" == *.tar.gz || "$f" == *.tgz ]]; then
-      if [[ "$f" == *.tar.gz || "$f" == *.tgz ]]; then
-        tar -xzf "$f" -C "$wal_dir"
-      else
-        tar -xf "$f" -C "$wal_dir"
-      fi
-    else
-      cp "$f" "$wal_dir/"
-    fi
-  done < <(find "$incr_dir" -maxdepth 1 -type f -print0 2>/dev/null || true)
+  age --decrypt --identity "$AGE_IDENTITY" --output "$decrypted" "$input"
+  [[ -s "$decrypted" ]] || die "age produced an empty plaintext backup"
+  chmod 600 -- "$decrypted"
 
-  cat > "${data_dir}/recovery.signal"
-  cat >> "${data_dir}/postgresql.auto.conf" <<EOF
-restore_command = 'cp /wal_archive/%f %p'
-recovery_target_time = '${date_target} 23:59:59'
-recovery_target_inclusive = on
-recovery_target_action = promote
-EOF
-
-  docker run -d --name "$container" \
-    -v "${data_dir}:/var/lib/postgresql/data" \
-    -v "${wal_dir}:/wal_archive:ro" \
-    -p "${port}:5432" \
-    "$POSTGRES_IMAGE" \
-    postgres -D /var/lib/postgresql/data >/dev/null
-
-  wait_for_db "$container" "$PG_USER" "$PG_DB" "$PG_PASSWORD"
-  docker exec -e PGPASSWORD="$PG_PASSWORD" "$container" psql -U "$PG_USER" -d "$PG_DB" -c "select current_database();" >/dev/null
-  log "Restore preview: postgresql://$PG_USER:<password>@localhost:$port/$PG_DB"
-  log "Container: $container"
-  set_cleanup "$keep" "$container" "$data_dir"
+  if [[ "$PREPARED_KIND" == zip ]]; then
+    prepared_dir="${WORK_DIR}/prepared"
+    helper_output="$(python3 "$ZIP_PREPARER" \
+      --max-member-bytes "$MAX_MEMBER_BYTES" \
+      --max-total-bytes "$MAX_TOTAL_BYTES" \
+      "$decrypted" "$prepared_dir")"
+    PREPARED_KIND="$(printf '%s\n' "$helper_output" | awk -F= '$1 == "prepared_kind" { print $2 }')"
+    [[ "$PREPARED_KIND" == dump || "$PREPARED_KIND" == sql ]] || \
+      die "logical ZIP preparer returned an invalid kind"
+    PREPARED_FILE="${prepared_dir}/restore.${PREPARED_KIND}"
+    [[ -s "$PREPARED_FILE" ]] || die "logical ZIP preparer did not create the expected file"
+    rm -f -- "$decrypted"
+    log "Verified logical backup member checksum"
+  else
+    raw_size="$(wc -c <"$decrypted" | tr -d '[:space:]')"
+    [[ "$raw_size" =~ ^[0-9]+$ && "$raw_size" -gt 0 ]] || die "invalid raw logical backup size"
+    ((raw_size <= MAX_MEMBER_BYTES && raw_size <= MAX_TOTAL_BYTES)) || \
+      die "raw logical backup exceeds the configured size limit"
+    PREPARED_FILE="$decrypted"
+  fi
 }
 
-main() {
-  local target_date="" source="azure" file="" blob_name="" sas_url="" local_dir="$BACKUPS_DIR" port="55432"
-  local keep_data=false
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --date) target_date="$2"; shift 2 ;;
-      --source) source="$2"; shift 2 ;;
-      --file) file="$2"; shift 2 ;;
-      --blob-name) blob_name="$2"; shift 2 ;;
-      --sas) sas_url="$2"; shift 2 ;;
-      --local-dir) local_dir="$2"; shift 2 ;;
-      --keep-data|--verify-only) keep_data=true; shift ;;
-      --port) port="$2"; shift 2 ;;
-      -h|--help) usage; exit 0 ;;
-      *) die "Unknown option: $1" ;;
-    esac
+wait_for_postgres() {
+  local attempts=0
+  while ((attempts < 60)); do
+    if docker exec "$RESTORE_CONTAINER" \
+      pg_isready -U "$RESTORE_PG_USER" -d "$RESTORE_PG_DB" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+    attempts=$((attempts + 1))
   done
-
-  [[ -n "$target_date" ]] || die "Missing --date"
-  date -u -d "$target_date" >/dev/null 2>&1 || die "Invalid date: $target_date"
-  have docker || die "docker is required"
-  have azcopy || die "azcopy is required"
-  load_defaults
-  [[ "$source" == "local" || "$source" == "azure" ]] || die "source must be local|azure"
-  sas_url="${sas_url:-$AZURE_SAS_URL}"
-  RESTORE_KEEP=$([[ "$keep_data" == true ]] && echo true || echo false)
-  log "Starting restore for date ${target_date} (source: ${source})"
-
-  local target_key
-  target_key="$(date_key "$target_date")"
-
-  if [[ "$source" == "local" ]]; then
-    if [[ -z "$file" ]]; then
-      file="$(find_local_for_date "$target_key" "$local_dir")"
-      [[ -n "$file" ]] || die "No local backup matched date $target_date under $local_dir"
-    fi
-    [[ -f "$file" ]] || die "File not found: $file"
-    restore_dir="$(mktemp -d)"
-    restore_legacy "$file" "$port" "$restore_dir" "$RESTORE_KEEP"
-    return 0
-  fi
-
-  [[ -n "$sas_url" ]] || die "No Azure SAS URL (use --sas or AZURE_BACKUP_SAS_URL)"
-  tmp_dir="$(mktemp -d)"
-  candidate_file="${tmp_dir}/candidates.txt"
-  collect_candidates "$sas_url" "$candidate_file"
-
-  if [[ -n "$blob_name" ]]; then
-    file="${tmp_dir}/explicit.backup"
-    download_blob "$sas_url" "$blob_name" "$file"
-    restore_dir="$(mktemp -d)"
-    restore_legacy "$file" "$port" "$restore_dir" "$RESTORE_KEEP"
-    return 0
-  fi
-
-  chain="$(select_chain_for_date "$target_key" "$candidate_file")"
-  selected_full="${chain%%|*}"
-  selected_incr="${chain#*|}"
-  [[ "$selected_full" != "__NONE__" ]] || die "No matching backup for $target_date"
-  if [[ "$selected_incr" == "__NONE__" ]]; then
-    file="${tmp_dir}/selected.zip"
-    download_blob "$sas_url" "$selected_full" "$file"
-    restore_dir="$(mktemp -d)"
-    restore_legacy "$file" "$port" "$restore_dir" "$RESTORE_KEEP"
-    return 0
-  fi
-
-  base_file="${tmp_dir}/base.tar"
-  incr_dir="${tmp_dir}/incr"
-  mkdir -p "$incr_dir"
-  download_blob "$sas_url" "$selected_full" "$base_file"
-  while IFS= read -r blob; do
-    [[ -z "$blob" ]] && continue
-    download_blob "$sas_url" "$blob" "$incr_dir/$(basename "$blob")"
-  done <<< "$selected_incr"
-
-  restore_dir="$(mktemp -d)"
-  restore_chain "$base_file" "$incr_dir" "$target_date" "$port" "$restore_dir" "$RESTORE_KEEP"
+  die "temporary PostgreSQL did not become ready"
 }
 
-main "$@"
+SOURCE=""
+INPUT_FILE=""
+TARGET_DATE=""
+BLOB_NAME=""
+LOCAL_DIR="$BACKUPS_DIR"
+PORT="55432"
+VERIFY_ONLY=false
+SAS_OPTION_SET=false
+LOCAL_DIR_OPTION_SET=false
+
+while (($# > 0)); do
+  case "$1" in
+    --source)
+      require_value "$1" "$#"
+      SOURCE="$2"
+      shift 2
+      ;;
+    --file)
+      require_value "$1" "$#"
+      INPUT_FILE="$2"
+      shift 2
+      ;;
+    --date)
+      require_value "$1" "$#"
+      TARGET_DATE="$2"
+      shift 2
+      ;;
+    --blob-name)
+      require_value "$1" "$#"
+      BLOB_NAME="$2"
+      shift 2
+      ;;
+    --sas)
+      require_value "$1" "$#"
+      AZURE_SAS_URL="$2"
+      SAS_OPTION_SET=true
+      shift 2
+      ;;
+    --age-identity)
+      require_value "$1" "$#"
+      AGE_IDENTITY="$2"
+      shift 2
+      ;;
+    --local-dir)
+      require_value "$1" "$#"
+      LOCAL_DIR="$2"
+      LOCAL_DIR_OPTION_SET=true
+      shift 2
+      ;;
+    --port)
+      require_value "$1" "$#"
+      PORT="$2"
+      shift 2
+      ;;
+    --verify-only)
+      VERIFY_ONLY=true
+      shift
+      ;;
+    --keep-data)
+      KEEP_DATA=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown option"
+      ;;
+  esac
+done
+
+[[ "$PORT" =~ ^[0-9]+$ ]] && ((PORT >= 1 && PORT <= 65535)) || die "invalid port"
+[[ "$MAX_MEMBER_BYTES" =~ ^[1-9][0-9]*$ ]] || die "LITELLM_RESTORE_MAX_MEMBER_BYTES must be positive"
+[[ "$MAX_TOTAL_BYTES" =~ ^[1-9][0-9]*$ ]] || die "LITELLM_RESTORE_MAX_TOTAL_BYTES must be positive"
+((MAX_TOTAL_BYTES >= MAX_MEMBER_BYTES)) || die "restore total-size limit must be at least the member-size limit"
+[[ "$RESTORE_PG_USER" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid PG_USER"
+[[ "$RESTORE_PG_DB" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid PG_DB"
+
+if [[ -z "$SOURCE" ]]; then
+  if [[ -n "$INPUT_FILE" ]]; then
+    SOURCE="local"
+  elif [[ -n "$BLOB_NAME" ]]; then
+    SOURCE="azure"
+  else
+    SOURCE="azure"
+  fi
+fi
+[[ "$SOURCE" == local || "$SOURCE" == azure ]] || die "--source must be local or azure"
+
+if [[ -n "$TARGET_DATE" ]]; then
+  validate_date "$TARGET_DATE" || die "invalid --date"
+fi
+[[ -z "$INPUT_FILE" || -z "$BLOB_NAME" ]] || die "--file and --blob-name are mutually exclusive"
+[[ -z "$INPUT_FILE" || -z "$TARGET_DATE" ]] || die "--file and --date are mutually exclusive"
+[[ -z "$BLOB_NAME" || -z "$TARGET_DATE" ]] || die "--blob-name and --date are mutually exclusive"
+[[ "$SOURCE" != local || "$SAS_OPTION_SET" != true ]] || die "--sas requires --source azure"
+[[ "$SOURCE" != azure || "$LOCAL_DIR_OPTION_SET" != true ]] || die "--local-dir requires --source local"
+[[ -z "$INPUT_FILE" || "$LOCAL_DIR_OPTION_SET" != true ]] || die "--local-dir is valid only with a local --date search"
+[[ "$SOURCE" != local || -z "$BLOB_NAME" ]] || die "--blob-name requires --source azure"
+[[ "$SOURCE" != azure || -z "$INPUT_FILE" ]] || die "--file requires --source local"
+if [[ "$SOURCE" == local ]]; then
+  [[ -n "$INPUT_FILE" || -n "$TARGET_DATE" ]] || die "local restore requires --file or --date"
+else
+  [[ -n "$BLOB_NAME" || -n "$TARGET_DATE" ]] || die "Azure restore requires --blob-name or --date"
+fi
+
+command -v docker >/dev/null 2>&1 || die "docker is required"
+command -v date >/dev/null 2>&1 || die "date is required"
+command -v age >/dev/null 2>&1 || die "age is required"
+command -v python3 >/dev/null 2>&1 || die "python3 is required"
+[[ -f "$ZIP_PREPARER" ]] || die "logical ZIP preparer not found: $ZIP_PREPARER"
+[[ -n "$AGE_IDENTITY" ]] || die "set LITELLM_AGE_IDENTITY_FILE or pass --age-identity"
+[[ -f "$AGE_IDENTITY" && -r "$AGE_IDENTITY" ]] || die "age identity file is not readable"
+AGE_IDENTITY_DIR="$(cd -- "$(dirname -- "$AGE_IDENTITY")" && pwd -P)"
+AGE_IDENTITY="${AGE_IDENTITY_DIR}/$(basename -- "$AGE_IDENTITY")"
+
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/litellm-restore.XXXXXX")"
+chmod 700 -- "$WORK_DIR"
+mkdir -p -- "${WORK_DIR}/azcopy-logs" "${WORK_DIR}/azcopy-plans"
+
+if [[ "$SOURCE" == local ]]; then
+  if [[ -z "$INPUT_FILE" ]]; then
+    DATE_KEY="${TARGET_DATE//-/}"
+    INPUT_FILE="$(find_local_for_date "$DATE_KEY" "$LOCAL_DIR")" || \
+      die "no local logical backup matched the requested date"
+  fi
+  [[ -f "$INPUT_FILE" && -r "$INPUT_FILE" ]] || die "local backup is not readable"
+  supported_path "$INPUT_FILE" || die "supported inputs are .zip.age, .dump.age, and .sql.age"
+else
+  command -v azcopy >/dev/null 2>&1 || die "azcopy is required for Azure restores"
+  [[ -n "$AZURE_SAS_URL" ]] || die "set AZURE_BACKUP_SAS_URL or pass --sas"
+  validate_sas_url "$AZURE_SAS_URL" || die "use a valid HTTPS container SAS URL"
+
+  if [[ -z "$BLOB_NAME" ]]; then
+    DATE_KEY="${TARGET_DATE//-/}"
+    BLOB_NAME="$(list_azure_for_date "$AZURE_SAS_URL" "$DATE_KEY")" || \
+      die "no Azure logical backup matched the requested date"
+  fi
+  validate_blob_name "$BLOB_NAME" || die "invalid or unsupported Azure blob name"
+
+  BLOB_BASENAME="$(basename -- "$BLOB_NAME")"
+  INPUT_FILE="${WORK_DIR}/${BLOB_BASENAME}"
+  log "Downloading Azure logical backup ${BLOB_BASENAME}"
+  download_azure_blob "$AZURE_SAS_URL" "$BLOB_NAME" "$INPUT_FILE"
+  download_azure_blob "$AZURE_SAS_URL" "${BLOB_NAME}.sha256" "${INPUT_FILE}.sha256"
+fi
+
+prepare_logical_input "$INPUT_FILE"
+
+RANDOM_PASSWORD="$(random_hex)"
+RUN_ID="$(random_hex)"
+TOKEN="${RUN_ID:0:24}"
+RESTORE_CONTAINER="litellm-restore-${TOKEN}"
+RESTORE_VOLUME="litellm-restore-data-${TOKEN}"
+
+if docker container inspect "$RESTORE_CONTAINER" >/dev/null 2>&1; then
+  die "refusing to reuse an existing restore container name"
+fi
+if docker volume inspect "$RESTORE_VOLUME" >/dev/null 2>&1; then
+  die "refusing to reuse an existing restore volume name"
+fi
+
+docker volume create \
+  --label "litellm.restore.owner=${SCRIPT_NAME}" \
+  --label "litellm.restore.run=${RUN_ID}" \
+  "$RESTORE_VOLUME" >/dev/null
+RESTORE_VOLUME_CREATED=true
+log "Starting isolated PostgreSQL restore container"
+RESTORE_CONTAINER_ID="$(docker create --name "$RESTORE_CONTAINER" \
+  --label "litellm.restore.owner=${SCRIPT_NAME}" \
+  --label "litellm.restore.run=${RUN_ID}" \
+  -e POSTGRES_USER="$RESTORE_PG_USER" \
+  -e POSTGRES_PASSWORD="$RANDOM_PASSWORD" \
+  -e POSTGRES_DB="$RESTORE_PG_DB" \
+  -v "${RESTORE_VOLUME}:/var/lib/postgresql/data" \
+  -p "127.0.0.1:${PORT}:5432" \
+  "$POSTGRES_IMAGE")"
+[[ -n "$RESTORE_CONTAINER_ID" ]] || die "Docker did not return a restore container ID"
+RESTORE_CONTAINER_CREATED=true
+docker start "$RESTORE_CONTAINER_ID" >/dev/null
+
+wait_for_postgres
+
+if [[ "$PREPARED_KIND" == dump ]]; then
+  docker exec -i -e PGPASSWORD="$RANDOM_PASSWORD" "$RESTORE_CONTAINER" \
+    pg_restore -U "$RESTORE_PG_USER" -d "$RESTORE_PG_DB" \
+      --clean --if-exists --no-owner --no-acl >/dev/null <"$PREPARED_FILE"
+else
+  docker exec -i -e PGPASSWORD="$RANDOM_PASSWORD" "$RESTORE_CONTAINER" \
+    psql -v ON_ERROR_STOP=1 -U "$RESTORE_PG_USER" -d "$RESTORE_PG_DB" \
+      >/dev/null <"$PREPARED_FILE"
+fi
+rm -f -- "$PREPARED_FILE"
+
+VERIFY_RESULT="$(docker exec -e PGPASSWORD="$RANDOM_PASSWORD" "$RESTORE_CONTAINER" \
+  psql -At -U "$RESTORE_PG_USER" -d "$RESTORE_PG_DB" \
+    -c "SELECT current_database(), count(*) FROM pg_catalog.pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');")"
+[[ -n "$VERIFY_RESULT" ]] || die "restore verification query returned no result"
+
+RESTORE_SUCCEEDED=true
+log "Restore verification succeeded (database and user-table count: ${VERIFY_RESULT})"
+
+if [[ "$KEEP_DATA" == true ]]; then
+  log "Kept container ${RESTORE_CONTAINER} and volume ${RESTORE_VOLUME} by explicit request"
+  log "Inspect with: docker exec -it ${RESTORE_CONTAINER} psql -U ${RESTORE_PG_USER} -d ${RESTORE_PG_DB}"
+  log "The published database port is bound only to 127.0.0.1:${PORT}"
+elif [[ "$VERIFY_ONLY" == true ]]; then
+  log "Verify-only drill completed; temporary container and volume will be removed"
+else
+  log "Restore drill completed; temporary container and volume will be removed"
+fi

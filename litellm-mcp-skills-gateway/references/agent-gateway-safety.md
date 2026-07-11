@@ -1,35 +1,35 @@
-# Agent Gateway Safety
+# Agent Gateway 安全參考
 
-Use this when combining MCP, Skills Gateway, agents, and LiteLLM operational controls.
+最後查證日期：2026-07-12。整合 MCP、Skills Gateway、agent 與 LiteLLM 維運控制時，精確 schema 請重新查核 [MCP](https://docs.litellm.ai/docs/mcp) 與 [Skills Gateway](https://docs.litellm.ai/docs/skills_gateway)。
 
-## MCP Configuration Gap
+## MCP 設定缺口
 
-When a concrete MCP server config is not available, use official LiteLLM MCP docs for exact schema, then apply the operational controls for keys, budgets, logs, and backups.
+若缺少可用的 MCP server 設定，先依官方 LiteLLM MCP 文件確認 schema，再套用 key、budget、log 與 backup 等維運控制。
 
-## Control Layers
+## 控制層
 
-- Virtual key allowlists limit which model aliases an agent can call.
-- Budgets and `budget_duration` limit blast radius.
-- MCP permissions limit which servers and tools are visible.
-- Tool permission guardrails limit generated tool calls.
-- MCP guardrails inspect MCP input/execution.
-- Observability ties actions back to key, team, agent, request, and tool.
-- Backups and export manifests provide rollback evidence for admin changes.
+- virtual key allowlist 限制 agent 可呼叫的 model alias。
+- budget 與 `budget_duration` 限制事故影響範圍。
+- MCP permission 限制可見的 server 與 tool。
+- tool permission guardrail 限制產生的 tool call。
+- MCP guardrail 檢查 MCP input 與 execution。
+- observability 應能以 key、team、agent、request 與 tool 追溯操作。
+- backup 與 export manifest 為管理異動保留 rollback 證據。
 
-## Safe Official Skills Usage
+## 安全使用官方 Skills
 
-Official `litellm-skills` can manage live proxy resources. Use them safely:
+官方 `litellm-skills` 可管理實際 Proxy 資源，使用時應：
 
-1. Install or invoke them first against a test proxy.
-2. Use least-privilege admin credentials where possible.
-3. Require a dry-run or explicit change list for destructive operations.
-4. Log users, teams, keys, models, MCP servers, agents, and usage changes.
-5. Keep rollback steps next to the operation, especially for key deletion and model removal.
+1. 先在測試 Proxy 安裝或執行。
+2. 儘可能使用最低權限的管理憑證。
+3. 破壞性操作必須先 dry-run，或提供明確 change list。
+4. 記錄 user、team、key、model、MCP server、agent 與 usage 的變更。
+5. 操作旁應附 rollback 步驟，尤其是刪除 key 或 model 時。
 
-## Review Checklist
+## 審查清單
 
-- The agent can see only the MCP tools needed for the task.
-- Write/delete/external-send tools have parameter constraints.
-- Tool-call logs do not contain raw secrets or unnecessary prompt content.
-- Admin actions are separated from normal inference keys.
-- Budget and usage reporting can identify runaway agent behavior quickly.
+- agent 只能看見任務所需的 MCP tool。
+- write、delete 與 external-send tool 具有參數限制。
+- tool-call log 不包含原始 secret 或非必要的 prompt 內容。
+- 管理操作與一般推論 key 分離。
+- budget 與 usage report 可快速辨識失控的 agent 行為。

@@ -1,20 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_DIR="${LITELLM_PROJECT_DIR:-$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)}"
 ENV_FILE="${LITELLM_ENV_FILE:-${PROJECT_DIR}/.env}"
 DEFAULT_OUTPUT_DIR="${PROJECT_DIR}/backups/spendlogs"
+ARCHIVE_VALIDATOR="${SCRIPT_DIR}/validate-spendlogs-archive.py"
+AGE_RECIPIENT="${LITELLM_AGE_RECIPIENT:-}"
+MAX_MEMBER_BYTES="${LITELLM_ARCHIVE_MAX_MEMBER_BYTES:-8589934592}"
+MAX_TOTAL_BYTES="${LITELLM_ARCHIVE_MAX_TOTAL_BYTES:-12884901888}"
 
 MONTH=""
 OUTPUT_DIR="$DEFAULT_OUTPUT_DIR"
 DRY_RUN="false"
 DELETE_AFTER_EXPORT="false"
+EXECUTE="false"
+EXPECT_COUNT=""
+FORCE_CURRENT_MONTH="false"
 
 COMPOSE_CMD=()
 CONTAINER_EXPORT_DIR=""
 WORK_DIR=""
+ARCHIVE_TEMP_PATH=""
+ARCHIVE_PLAIN_PATH=""
+ARCHIVE_SUM_PATH=""
+ARCHIVE_SUM_TEMP=""
+PUBLISH_DIR=""
+ARCHIVE_READY="false"
+SUM_PUBLISHED="false"
 
 SPENDLOG_COLUMNS=(
   request_id
@@ -57,8 +72,12 @@ Usage: ${SCRIPT_NAME} --month <YYYY-MM> [options]
 Options:
   --month <YYYY-MM>          Month to export from LiteLLM_SpendLogs.
   --output-dir <dir>         Output directory (default: backups/spendlogs).
+  --age-recipient <value>    Explicit age recipient (or LITELLM_AGE_RECIPIENT).
   --dry-run                  Show range, row count, and output name only.
-  --delete-after-export      Delete only the exported request_id rows after the archive is created.
+  --delete-after-export      Request deletion of the exported request_id rows.
+  --execute                  Confirm the requested post-export deletion.
+  --expect-count <N>         Required expected row count for post-export deletion.
+  --force-current-month      Permit deletion for the current UTC month.
   -h, --help                 Show this help.
 EOF
 }
@@ -80,6 +99,18 @@ cleanup() {
   fi
   if [[ -n "$WORK_DIR" ]]; then
     rm -rf "$WORK_DIR"
+  fi
+  if [[ -n "$ARCHIVE_TEMP_PATH" ]]; then
+    rm -f "$ARCHIVE_TEMP_PATH"
+  fi
+  if [[ -n "$ARCHIVE_SUM_TEMP" ]]; then
+    rm -f "$ARCHIVE_SUM_TEMP"
+  fi
+  if [[ "$SUM_PUBLISHED" == "true" && "$ARCHIVE_READY" != "true" && -n "$ARCHIVE_SUM_PATH" ]]; then
+    rm -f "$ARCHIVE_SUM_PATH"
+  fi
+  if [[ -n "$PUBLISH_DIR" && -d "$PUBLISH_DIR" ]]; then
+    rm -rf "$PUBLISH_DIR"
   fi
 }
 
@@ -133,6 +164,9 @@ ensure_prereqs() {
   have docker || die "docker command not found."
   have tar || die "tar command not found."
   have sha256sum || die "sha256sum command not found."
+  have python3 || die "python3 command not found."
+  have age || die "age command not found."
+  [[ -f "$ARCHIVE_VALIDATOR" ]] || die "archive validator not found: $ARCHIVE_VALIDATOR"
   docker info >/dev/null 2>&1 || die "Docker is not running."
   [[ -f "$PROJECT_DIR/docker-compose.yml" || -f "$PROJECT_DIR/compose.yml" || -f "$PROJECT_DIR/compose.yaml" ]] || die "compose file not found in $PROJECT_DIR."
 }
@@ -158,10 +192,11 @@ validate_month() {
 count_month_rows() {
   local db_user="$1" db_name="$2" start_ts="$3" end_ts="$4"
   compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name" -Atq <<SQL
+SET TIME ZONE 'UTC';
 SELECT COUNT(*)
 FROM public."LiteLLM_SpendLogs"
-WHERE "startTime" >= '${start_ts}'::timestamp
-  AND "startTime" < '${end_ts}'::timestamp;
+WHERE "startTime" >= '${start_ts}+00'::timestamptz
+  AND "startTime" < '${end_ts}+00'::timestamptz;
 SQL
 }
 
@@ -175,11 +210,12 @@ count_request_ids_file() {
 }
 
 delete_exported_rows() {
-  local db_user="$1" db_name="$2" expected_count="$3" request_ids_path="$4"
+  local db_user="$1" db_name="$2" expected_count="$3" request_ids_path="$4" start_ts="$5" end_ts="$6"
 
   log "Deleting ${expected_count} exported rows from LiteLLM_SpendLogs..."
   compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$db_user" -d "$db_name" >/dev/null <<SQL
 BEGIN;
+SET LOCAL TIME ZONE 'UTC';
 CREATE TEMP TABLE _spendlogs_delete_ids (
   request_id text PRIMARY KEY
 ) ON COMMIT DROP;
@@ -194,10 +230,24 @@ BEGIN
     RAISE EXCEPTION 'request id count mismatch: expected %, got %', ${expected_count}, id_count;
   END IF;
 
+  IF EXISTS (
+    SELECT 1
+    FROM _spendlogs_delete_ids ids
+    LEFT JOIN public."LiteLLM_SpendLogs" target
+      ON target.request_id = ids.request_id
+     AND target."startTime" >= '${start_ts}+00'::timestamptz
+     AND target."startTime" < '${end_ts}+00'::timestamptz
+    WHERE target.request_id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'exported request IDs no longer match the requested UTC month';
+  END IF;
+
   WITH deleted AS (
     DELETE FROM public."LiteLLM_SpendLogs" target
     USING _spendlogs_delete_ids ids
     WHERE target.request_id = ids.request_id
+      AND target."startTime" >= '${start_ts}+00'::timestamptz
+      AND target."startTime" < '${end_ts}+00'::timestamptz
     RETURNING 1
   )
   SELECT COUNT(*) INTO deleted_count FROM deleted;
@@ -215,11 +265,18 @@ SQL
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --month)
-      MONTH="${2:-}"
+      [[ $# -ge 2 ]] || die "--month requires a value."
+      MONTH="$2"
       shift 2
       ;;
     --output-dir)
-      OUTPUT_DIR="${2:-}"
+      [[ $# -ge 2 ]] || die "--output-dir requires a value."
+      OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    --age-recipient)
+      [[ $# -ge 2 ]] || die "--age-recipient requires a value."
+      AGE_RECIPIENT="$2"
       shift 2
       ;;
     --dry-run)
@@ -228,6 +285,19 @@ while [[ $# -gt 0 ]]; do
       ;;
     --delete-after-export)
       DELETE_AFTER_EXPORT="true"
+      shift
+      ;;
+    --execute)
+      EXECUTE="true"
+      shift
+      ;;
+    --expect-count)
+      [[ $# -ge 2 ]] || die "--expect-count requires a value."
+      EXPECT_COUNT="$2"
+      shift 2
+      ;;
+    --force-current-month)
+      FORCE_CURRENT_MONTH="true"
       shift
       ;;
     -h|--help)
@@ -242,7 +312,29 @@ done
 
 [[ -n "$MONTH" ]] || die "--month is required."
 [[ -n "$OUTPUT_DIR" ]] || die "--output-dir cannot be empty."
+[[ -n "$AGE_RECIPIENT" ]] || die "set LITELLM_AGE_RECIPIENT or pass --age-recipient."
+[[ "$AGE_RECIPIENT" != *$'\n'* && "$AGE_RECIPIENT" != *$'\r'* ]] || die "invalid age recipient."
+[[ "$MAX_MEMBER_BYTES" =~ ^[1-9][0-9]*$ ]] || die "LITELLM_ARCHIVE_MAX_MEMBER_BYTES must be positive."
+[[ "$MAX_TOTAL_BYTES" =~ ^[1-9][0-9]*$ ]] || die "LITELLM_ARCHIVE_MAX_TOTAL_BYTES must be positive."
+((MAX_TOTAL_BYTES >= MAX_MEMBER_BYTES)) || die "archive total-size limit must be at least the member-size limit."
 validate_month
+[[ -z "$EXPECT_COUNT" || "$EXPECT_COUNT" =~ ^[0-9]+$ ]] || die "--expect-count must be a non-negative integer."
+[[ "$DRY_RUN" != "true" || "$EXECUTE" != "true" ]] || die "--dry-run and --execute cannot be used together."
+if [[ "$DELETE_AFTER_EXPORT" == "true" ]]; then
+  [[ -n "$EXPECT_COUNT" ]] || die "--delete-after-export requires --expect-count N."
+  if [[ "$DRY_RUN" != "true" ]]; then
+    [[ "$EXECUTE" == "true" ]] || die "--delete-after-export requires --execute."
+  fi
+else
+  [[ "$EXECUTE" != "true" ]] || die "--execute is valid only with --delete-after-export."
+  [[ -z "$EXPECT_COUNT" ]] || die "--expect-count is valid only with --delete-after-export."
+  [[ "$FORCE_CURRENT_MONTH" != "true" ]] || die "--force-current-month is valid only with --delete-after-export."
+fi
+
+CURRENT_UTC_MONTH="$(date -u +%Y-%m)"
+if [[ "$DELETE_AFTER_EXPORT" == "true" && "$DRY_RUN" != "true" && "$MONTH" == "$CURRENT_UTC_MONTH" && "$FORCE_CURRENT_MONTH" != "true" ]]; then
+  die "Refusing to delete the current UTC month; pass --force-current-month only after verifying active writes are stopped."
+fi
 
 init_compose
 ensure_prereqs
@@ -258,8 +350,9 @@ END_DATE="$(date -u -d "${START_DATE} +1 month" +%Y-%m-%d)"
 START_TS="${START_DATE} 00:00:00"
 END_TS="${END_DATE} 00:00:00"
 ARCHIVE_TS="$(date -u +%Y%m%dT%H%M%SZ)"
-ARCHIVE_NAME="LiteLLM_SpendLogs_${MONTH}_${ARCHIVE_TS}.tar.gz"
+ARCHIVE_NAME="LiteLLM_SpendLogs_${MONTH}_${ARCHIVE_TS}.tar.gz.age"
 ARCHIVE_PATH="${OUTPUT_DIR%/}/${ARCHIVE_NAME}"
+ARCHIVE_SUM_PATH="${ARCHIVE_PATH}.sha256"
 
 EXPECTED_COUNT="$(count_month_rows "$DB_USER" "$DB_NAME" "$START_TS" "$END_TS" | tr -d '[:space:]')"
 [[ "$EXPECTED_COUNT" =~ ^[0-9]+$ ]] || die "Could not read month row count."
@@ -268,15 +361,27 @@ if [[ "$DRY_RUN" == "true" ]]; then
   log "Dry run only. No archive will be created and no rows will be deleted."
   printf 'table=public."LiteLLM_SpendLogs"\n'
   printf 'month=%s\n' "$MONTH"
-  printf 'range_start=%s\n' "${START_TS/ /T}"
-  printf 'range_end=%s\n' "${END_TS/ /T}"
+  printf 'range_start=%s\n' "${START_TS/ /T}Z"
+  printf 'range_end=%s\n' "${END_TS/ /T}Z"
   printf 'row_count=%s\n' "$EXPECTED_COUNT"
   printf 'output=%s\n' "$ARCHIVE_PATH"
+  if [[ "$DELETE_AFTER_EXPORT" == "true" ]]; then
+    printf 'delete_after_export=true\n'
+    printf 'expected_delete_count=%s\n' "$EXPECT_COUNT"
+    [[ "$EXPECTED_COUNT" == "$EXPECT_COUNT" ]] || die "row count mismatch: expected=${EXPECT_COUNT}, actual=${EXPECTED_COUNT}"
+  fi
   exit 0
 fi
 
 mkdir -p "$OUTPUT_DIR"
+[[ ! -e "$ARCHIVE_PATH" && ! -e "$ARCHIVE_SUM_PATH" ]] || die "Archive output already exists: $ARCHIVE_PATH"
 WORK_DIR="$(mktemp -d)"
+chmod 700 "$WORK_DIR"
+PUBLISH_DIR="$(mktemp -d "${OUTPUT_DIR%/}/.spendlogs-publish.XXXXXX")"
+chmod 700 "$PUBLISH_DIR"
+ARCHIVE_TEMP_PATH="${PUBLISH_DIR}/${ARCHIVE_NAME}"
+ARCHIVE_SUM_TEMP="${PUBLISH_DIR}/$(basename "$ARCHIVE_SUM_PATH")"
+ARCHIVE_PLAIN_PATH="${WORK_DIR}/LiteLLM_SpendLogs_${MONTH}_${ARCHIVE_TS}.tar.gz"
 PACKAGE_DIR="${WORK_DIR}/package"
 DATA_DIR="${PACKAGE_DIR}/data"
 SCHEMA_DIR="${PACKAGE_DIR}/schema"
@@ -296,11 +401,15 @@ T_COLUMNS="$(columns_sql "t")"
 log "Exporting ${MONTH} from LiteLLM_SpendLogs (${START_TS} <= startTime < ${END_TS})..."
 compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" >/dev/null <<SQL
 BEGIN ISOLATION LEVEL REPEATABLE READ;
-CREATE TEMP TABLE _spendlogs_export_ids ON COMMIT DROP AS
+SET LOCAL TIME ZONE 'UTC';
+CREATE TEMP TABLE _spendlogs_export_ids (
+  request_id text PRIMARY KEY
+) ON COMMIT DROP;
+INSERT INTO _spendlogs_export_ids(request_id)
 SELECT request_id
 FROM public."LiteLLM_SpendLogs"
-WHERE "startTime" >= '${START_TS}'::timestamp
-  AND "startTime" < '${END_TS}'::timestamp;
+WHERE "startTime" >= '${START_TS}+00'::timestamptz
+  AND "startTime" < '${END_TS}+00'::timestamptz;
 \copy (SELECT ${T_COLUMNS} FROM public."LiteLLM_SpendLogs" t JOIN _spendlogs_export_ids ids ON ids.request_id = t.request_id ORDER BY t."startTime", t.request_id) TO '${CONTAINER_DATA_FILE}' WITH (FORMAT csv, HEADER true, FORCE_QUOTE *);
 \copy (SELECT request_id FROM _spendlogs_export_ids ORDER BY request_id) TO '${CONTAINER_REQUEST_IDS_FILE}' WITH (FORMAT csv, HEADER true);
 COMMIT;
@@ -319,16 +428,17 @@ compose exec -T postgres pg_dump -U "$DB_USER" -d "$DB_NAME" --schema-only -t 'p
 
 DATA_SHA256="$(sha256sum "$DATA_FILE" | awk '{print $1}')"
 REQUEST_IDS_SHA256="$(sha256sum "$REQUEST_IDS_FILE" | awk '{print $1}')"
+SCHEMA_SHA256="$(sha256sum "$SCHEMA_FILE" | awk '{print $1}')"
 EXPORTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 cat > "$MANIFEST_FILE" <<EOF
-archive_format=litellm_spendlogs_month_v1
+archive_format=litellm_spendlogs_month_v2
 table_schema=public
 table_name=LiteLLM_SpendLogs
 month=${MONTH}
-range_start=${START_TS/ /T}
-range_end=${END_TS/ /T}
-timezone_basis=DB_UTC
+range_start=${START_TS/ /T}Z
+range_end=${END_TS/ /T}Z
+timezone_basis=UTC
 row_count=${ACTUAL_COUNT}
 exported_at_utc=${EXPORTED_AT_UTC}
 source_database=${DB_NAME}
@@ -337,12 +447,32 @@ data_sha256=${DATA_SHA256}
 request_ids_file=data/request_ids.csv
 request_ids_sha256=${REQUEST_IDS_SHA256}
 schema_file=schema/LiteLLM_SpendLogs.schema.sql
+schema_sha256=${SCHEMA_SHA256}
 EOF
 
-tar -czf "$ARCHIVE_PATH" -C "$PACKAGE_DIR" manifest.env data schema
-log "Archive created: $ARCHIVE_PATH"
+tar -czf "$ARCHIVE_PLAIN_PATH" -C "$PACKAGE_DIR" manifest.env data schema
+python3 "$ARCHIVE_VALIDATOR" \
+  --max-member-bytes "$MAX_MEMBER_BYTES" \
+  --max-total-bytes "$MAX_TOTAL_BYTES" \
+  "$ARCHIVE_PLAIN_PATH" "${WORK_DIR}/validated" >/dev/null
+age --encrypt --recipient "$AGE_RECIPIENT" \
+  --output "$ARCHIVE_TEMP_PATH" "$ARCHIVE_PLAIN_PATH"
+[[ -s "$ARCHIVE_TEMP_PATH" ]] || die "age produced an empty encrypted archive."
+rm -f "$ARCHIVE_PLAIN_PATH"
+ARCHIVE_PLAIN_PATH=""
+printf '%s  %s\n' "$(sha256sum "$ARCHIVE_TEMP_PATH" | awk '{print $1}')" "$ARCHIVE_NAME" >"$ARCHIVE_SUM_TEMP"
+mv --no-clobber "$ARCHIVE_SUM_TEMP" "$ARCHIVE_SUM_PATH"
+[[ ! -e "$ARCHIVE_SUM_TEMP" && -s "$ARCHIVE_SUM_PATH" ]] || die "Archive checksum destination appeared during publication."
+SUM_PUBLISHED="true"
+ARCHIVE_SUM_TEMP=""
+mv --no-clobber "$ARCHIVE_TEMP_PATH" "$ARCHIVE_PATH"
+[[ ! -e "$ARCHIVE_TEMP_PATH" && -s "$ARCHIVE_PATH" ]] || die "Archive destination appeared during publication."
+ARCHIVE_TEMP_PATH=""
+ARCHIVE_READY="true"
+log "Encrypted archive created: $ARCHIVE_PATH"
 log "Exported rows: $ACTUAL_COUNT"
 
 if [[ "$DELETE_AFTER_EXPORT" == "true" ]]; then
-  delete_exported_rows "$DB_USER" "$DB_NAME" "$ACTUAL_COUNT" "$CONTAINER_REQUEST_IDS_FILE"
+  [[ "$ACTUAL_COUNT" == "$EXPECT_COUNT" ]] || die "exported row count mismatch; archive retained but nothing deleted. expected=${EXPECT_COUNT}, actual=${ACTUAL_COUNT}"
+  delete_exported_rows "$DB_USER" "$DB_NAME" "$ACTUAL_COUNT" "$CONTAINER_REQUEST_IDS_FILE" "$START_TS" "$END_TS"
 fi

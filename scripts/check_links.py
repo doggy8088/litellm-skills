@@ -8,6 +8,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 
 
@@ -17,8 +18,18 @@ URL_RE = re.compile(r"https://[^)\s]+")
 
 def main() -> int:
     urls: set[str] = set()
-    for path in [ROOT / "README.md", *ROOT.glob("litellm-*/**/*.md")]:
-        urls.update(URL_RE.findall(path.read_text(encoding="utf-8")))
+    paths = [
+        ROOT / "README.md",
+        *ROOT.glob("litellm-*/**/*.md"),
+        *ROOT.glob("docs/**/*.md"),
+        *ROOT.glob("curriculum/**/*.md"),
+    ]
+    for path in paths:
+        for url in URL_RE.findall(path.read_text(encoding="utf-8")):
+            cleaned = url.rstrip('`\'".,;:')
+            if urlparse(cleaned).hostname in {"example.com", "litellm.example.com"}:
+                continue
+            urls.add(cleaned)
 
     failures: list[str] = []
     for url in sorted(urls):

@@ -1,98 +1,32 @@
 ---
 name: litellm-proxy-gateway
-description: 設計、建立或審查 LiteLLM Proxy Server 作為 OpenAI-compatible LLM Gateway、集中式模型入口、virtual key 與 config.yaml 時使用。
+description: 建立或審查 LiteLLM Proxy 的基礎拓樸、model alias、config.yaml、啟動方式與 OpenAI-compatible client。當任務是架設集中式模型入口或遷移既有 OpenAI client 時使用；成本治理、觀測、安全、可靠性與 MCP 細節必須搭配對應專門技能。
 ---
 
 # LiteLLM Proxy Gateway
 
-## 使用時機
-
-當任務需要集中控管多個模型 provider、讓既有 OpenAI-compatible client 透過同一個 endpoint 呼叫模型，或需要 virtual keys、budgets、logging、guardrails、Admin UI 時，使用此技能。
-
-## 官方依據
-
-- Getting Started：https://docs.litellm.ai/docs/
-- LiteLLM AI Gateway：https://docs.litellm.ai/docs/simple_proxy
-- Proxy config overview：https://docs.litellm.ai/docs/proxy/configs
-- Config settings：https://docs.litellm.ai/docs/proxy/config_settings
-- Life of a Request：https://docs.litellm.ai/docs/proxy/architecture
-- Virtual Keys：https://docs.litellm.ai/docs/proxy/virtual_keys
-
 ## 工作流程
 
-1. 判斷是否真的需要 Proxy：若只是單一 Python app 的本地整合，SDK 可能足夠；若是團隊共用、權限、成本、紀錄或防護需求，使用 Proxy。
-2. 建立 `config.yaml`，至少包含 `model_list`；依需求加入 `router_settings`、`litellm_settings`、`general_settings`、`environment_variables`。
-3. 用 `model_name` 建立對外 alias，用 `litellm_params.model` 指向實際 provider model。
-4. 所有 API key、database URL、Redis 密碼與 master key 都透過環境變數注入。
-5. 以 `litellm --config config.yaml` 或 Docker 啟動 proxy，確認預設 port 與 base URL。
-6. 用 OpenAI SDK 測試 `base_url="http://localhost:4000"`，確認既有 client 不需改 provider-specific SDK。
-7. 若要 spend tracking、virtual keys、teams 或 budgets，設定資料庫並驗證 spend 是否寫入。
-8. 若要多 proxy instance 或集中 rate limit/load balancing 狀態，加入 Redis。
-9. 使用 `/utils/transform_request` 檢查 LiteLLM 實際送往 provider 的 payload。
-10. 交付前列出開發、測試、正式環境的 key、model alias、budget 與 logging 差異。
+1. 判斷單一應用程式是否使用 SDK 即可；只有集中權限、治理或共用入口才採 Proxy。
+2. 查核 LiteLLM 版本與 config schema。
+3. 建立最小 `model_list`，以穩定 `model_name` 對應 provider-prefixed model。
+4. 從環境變數注入 provider key、master key、database URL 與 Redis secret。
+5. 啟動 Proxy，以 OpenAI SDK 驗證 alias 與錯誤路徑。
+6. 依需求載入 `litellm-routing-reliability`、`litellm-cost-governance`、`litellm-observability`、`litellm-guardrails-safety` 或 `litellm-mcp-skills-gateway`。
+7. 交付開發、測試、正式環境差異及驗證證據。
 
-## Config 範例
+需要 config、client smoke test 或版本注意事項時，讀取 [實驗與參考](references/guide.md)。
 
-```yaml
-model_list:
-  - model_name: course-gpt
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
+## 安全底線
 
-router_settings:
-  num_retries: 2
-  timeout: 30
+- 不在設定、程式碼、命令歷史或教材中放真實 secret。
+- 正式 client 不使用 master key。
+- 不把 provider key 與 Proxy virtual key 視為同一權限層。
+- 對外服務使用 TLS、受控網路與最小公開端點；本機 HTTP 範例不得直接沿用到正式環境。
 
-general_settings:
-  master_key: os.environ/LITELLM_MASTER_KEY
-```
+## 驗收
 
-## OpenAI Client 測試
-
-```python
-import openai
-
-client = openai.OpenAI(
-    api_key="test-key-from-your-litellm-proxy",
-    base_url="http://localhost:4000",
-)
-
-response = client.chat.completions.create(
-    model="course-gpt",
-    messages=[{"role": "user", "content": "Hello from LiteLLM Proxy"}],
-)
-
-print(response.choices[0].message.content)
-```
-
-## 教學練習
-
-- 建立兩個 `model_name` alias，分別指向 OpenAI 與 Ollama。
-- 用同一段 OpenAI SDK 程式碼切換 proxy model alias。
-- 讓學生用 `config.yaml` 增加環境變數引用，並說明為何不可提交 secret。
-- 開啟 Admin UI 後建立測試 virtual key，限制可用模型。
-
-## 驗收檢查
-
-- `config.yaml` 沒有真實 secret。
-- 對外暴露的是穩定 model alias，而不是到處散落 provider-specific model 名稱。
-- OpenAI SDK 能成功透過 proxy 呼叫模型。
-- 若啟用 spend tracking，已設定資料庫並能查到 key、user 或 team spend。
-- 若有多個 proxy instance，Redis 設定與連線方式清楚。
-
-## 常見錯誤
-
-- 把 `model_name` 與 `litellm_params.model` 混淆。
-- 在正式環境用 master key 當一般 client key。
-- 没有把 proxy 層的 key 權限與 provider key 權限分開管理。
-- 未測試 provider payload transform 就直接排查模型品質問題。
-
-## 使用情境與提示詞範例
-
-- **情境 1：建立基本 `config.yaml` 與多模型 Alias**
-  * *提示詞*：「幫我設計一個 LiteLLM Proxy 的 `config.yaml`。我需要設定兩個模型 alias：`course-gpt` 指向 `openai/gpt-4o-mini`，`course-claude` 指向 `anthropic/claude-3-5-haiku`。所有的 API keys 都必須從環境變數讀取。」
-- **情境 2：使用 OpenAI SDK 測試 Proxy 連線**
-  * *提示詞*：「我已經啟動了本地的 LiteLLM Proxy（`http://localhost:4000`）。請幫我寫一個 Python 測試腳本，使用標準的 `openai` SDK，搭配虛擬的金鑰（test-key），來呼叫我們在 proxy 中設定好的 `course-gpt` 模型。」
-- **情境 3：虛擬金鑰（Virtual Keys）與權限控管**
-  * *提示詞*：「我想在 LiteLLM Proxy 中啟用虛擬金鑰功能。請幫我寫一份教學，說明如何在 config 中啟用資料庫儲存 spend tracking，並寫出如何使用 admin key 透過 API 建立一個限制只能使用 `course-gpt` 且每日額度為 $1 USD 的虛擬金鑰。」
+- Config 可載入且沒有真實 secret。
+- OpenAI-compatible client 能透過 alias 完成 smoke request。
+- 未授權 key 被拒絕。
+- 專門治理需求已路由到對應 skill，而非在本技能內自行簡化。

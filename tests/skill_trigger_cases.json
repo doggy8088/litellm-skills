@@ -1,0 +1,12 @@
+[
+  {"prompt": "用 LiteLLM Python SDK 做 structured output", "expected_skills": ["litellm-sdk-basics"], "excluded_skills": ["litellm-proxy-gateway"]},
+  {"prompt": "建立 LiteLLM Proxy model alias 並讓 OpenAI SDK 連線", "expected_skills": ["litellm-proxy-gateway"], "excluded_skills": ["litellm-sdk-basics"]},
+  {"prompt": "設定跨 provider fallback 與 timeout", "expected_skills": ["litellm-routing-reliability"], "excluded_skills": ["litellm-cost-governance"]},
+  {"prompt": "替學生 virtual key 設定預算與成本歸因", "expected_skills": ["litellm-cost-governance"], "excluded_skills": ["litellm-observability"]},
+  {"prompt": "用 OpenTelemetry 追蹤 LiteLLM fallback", "expected_skills": ["litellm-observability"], "excluded_skills": ["litellm-guardrails-safety"]},
+  {"prompt": "限制模型只能呼叫特定工具並遮罩個資", "expected_skills": ["litellm-guardrails-safety"], "excluded_skills": ["litellm-mcp-skills-gateway"]},
+  {"prompt": "註冊 MCP server 並限制 agent 可見工具", "expected_skills": ["litellm-mcp-skills-gateway"], "excluded_skills": ["litellm-sdk-basics"]},
+  {"prompt": "建立有預算與 trace 的 LiteLLM Proxy", "expected_skills": ["litellm-proxy-gateway", "litellm-cost-governance", "litellm-observability"]},
+  {"prompt": "替 MCP tool 加上參數 guardrail", "expected_skills": ["litellm-mcp-skills-gateway", "litellm-guardrails-safety"]},
+  {"prompt": "比較兩個模型的 fallback 成本", "expected_skills": ["litellm-routing-reliability", "litellm-cost-governance"]}
+]

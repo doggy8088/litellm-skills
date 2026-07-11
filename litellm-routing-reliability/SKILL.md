@@ -1,99 +1,32 @@
 ---
 name: litellm-routing-reliability
-description: 設計、教學或審查 LiteLLM Router、load balancing、fallback、retry、timeout、rate limits、health checks 與可靠性策略時使用。
+description: 設計或審查 LiteLLM Router、load balancing、retry、timeout、fallback、rate-limit routing 與 health checks。當任務要求多 deployment、跨 provider 備援或可靠性測試時使用；預算政策交由成本治理技能，trace 後端交由觀測技能。
 ---
 
 # LiteLLM Routing Reliability
 
-## 使用時機
-
-當任務需要讓 LiteLLM 在多個 deployments、regions、providers 或 model groups 之間可靠地路由時，使用此技能。
-
-## 官方依據
-
-- Router - Load Balancing：https://docs.litellm.ai/docs/routing
-- Proxy - Load Balancing：https://docs.litellm.ai/docs/proxy/load_balancing
-- Fallbacks：https://docs.litellm.ai/docs/proxy/reliability
-- Reliable completions：https://docs.litellm.ai/docs/completion/reliable_completions
-- Health Checks：https://docs.litellm.ai/docs/proxy/health
-- Life of a Request：https://docs.litellm.ai/docs/proxy/architecture
-
-## 核心判斷
-
-- Load balancing：同一個 user-facing `model_name` 底下有多個 deployments，LiteLLM 依策略分流。
-- Retry：同一個請求失敗後，針對目前 deployment 或策略設定重試。
-- Fallback：重試仍失敗後，切到另一個 model group 或 fallback model。
-- Rate limit routing：用 `rpm`、`tpm`、Redis 與 routing strategy 避開已滿載 deployments。
-- Health check：用 proxy 健康端點判斷服務本身、readiness、liveliness 與 provider health。
-
 ## 工作流程
 
-1. 建立 `model_list`，把同一個對外 alias 對應到多個 deployments。
-2. 為每個 deployment 寫清楚 `rpm`、`tpm`、region、provider、api_base 與用途。
-3. 在 `router_settings` 設定 `routing_strategy`，常見值包含 `simple-shuffle`、`least-busy`、`usage-based-routing`、`latency-based-routing`。
-4. 設定 `num_retries` 與 `timeout`，避免長時間卡住 agent 工作流。
-5. 設定 `fallbacks`，清楚標示 primary model group 與 fallback model group。
-6. 若多個 proxy instance 共用路由狀態，設定 Redis；不要只依賴單一 instance 記憶體。
-7. 若要把 `rpm`、`tpm` 變成硬性限制，評估 `enforce_model_rate_limits`。
-8. 建立測試：正常路由、rate limit 模擬、fallback 模擬、provider timeout、全部 provider 失敗。
-9. 在正式環境加入 `/health`、`/health/readiness`、`/health/liveliness` 監控。
-10. 交付時輸出一張路由矩陣，列出每個 alias 的 provider、region、fallback 與成本層級。
+1. 定義 user-facing model group、deployments、region、容量與故障域。
+2. 查核目前支援的 routing strategy、retry、timeout 與 fallback schema。
+3. 設定有限重試與整體 timeout，再定義有順序的 fallback。
+4. 多 instance 共享路由或 health 狀態時評估 Redis。
+5. 分別測試正常路由、429、timeout、primary 失敗與全 deployments 失敗。
+6. 使用 readiness 作為接流量判斷、liveliness 作為重啟判斷；不要把會實際呼叫模型的 `/health` 當高頻免費 probe。
+7. 回報實際命中的 deployment、重試次數、延遲與成本影響。
 
-## Config 範例
+需要設定範例、fallback mock 或 health endpoint 細節時，讀取 [實驗與參考](references/guide.md)。
 
-```yaml
-model_list:
-  - model_name: course-chat
-    litellm_params:
-      model: azure/course-gpt-eu
-      api_base: os.environ/AZURE_EU_API_BASE
-      api_key: os.environ/AZURE_EU_API_KEY
-      rpm: 60
-  - model_name: course-chat
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
-      rpm: 120
-  - model_name: course-chat-fallback
-    litellm_params:
-      model: anthropic/claude-3-5-haiku-latest
-      api_key: os.environ/ANTHROPIC_API_KEY
+## 安全底線
 
-router_settings:
-  routing_strategy: least-busy
-  num_retries: 2
-  timeout: 30
-  fallbacks:
-    - course-chat: ["course-chat-fallback"]
-```
+- Fallback 不得繞過模型權限、資料區域、guardrail 或預算限制。
+- 不以同一 provider、同一 region 作為唯一災難備援。
+- 不設定無限重試或無上限 timeout。
+- 測試不得用大量付費流量製造 429。
 
-## 教學練習
+## 驗收
 
-- 讓學生用同一個 `model_name` 建立兩個 deployments，觀察路由分布。
-- 用 `mock_testing_fallbacks=true` 驗證 fallback 是否真的被觸發。
-- 設定很低的 `rpm`，觀察 routing decision 與 429 行為。
-- 模擬一個 provider timeout，要求學生解釋 retry 與 fallback 的差異。
-
-## 驗收檢查
-
-- 每個 user-facing alias 都有明確 primary 與 fallback 策略。
-- `num_retries`、`timeout`、fallback 順序不互相矛盾。
-- 多 instance 部署時有 Redis 或等效共享狀態設計。
-- health endpoint 已納入部署檢查。
-- 成本較高的 fallback 不會在未限制情況下被大量流量打爆。
-
-## 常見錯誤
-
-- 用 fallback 補救所有問題，卻沒有處理 timeout 與 retry。
-- fallback 指到成本高很多的模型，沒有 budget 或告警。
-- 用同一個 provider、同一個 region 當唯一 fallback，無法抵抗 provider 或區域故障。
-- 沒有測試 rate limit 情境，只測 happy path。
-
-## 使用情境與提示詞範例
-
-- **情境 1：負載平衡與 Router 設定**
-  * *提示詞*：「我想為 `gpt-4o-mini` 設計一個負載平衡（Load Balancing）的 Router 設定。請幫我寫一個 `config.yaml`，配置兩個不同的 API keys（以環境變數形式）分別對應到相同的模型，並說明 LiteLLM 是如何進行請求分流的。」
-- **情境 2：自動容錯備援（Failover / Fallback）**
-  * *提示詞*：「請幫我設計一個具備容錯備援機制的 LiteLLM Proxy 設定。當主模型 `openai/gpt-4o` 發生 Rate Limit 或 Service Unavailable 時，能自動 fallback 到備用模型 `anthropic/claude-3-5-sonnet`，並 provide 測試此備援機制的 Python 範例。」
-- **情境 3：重試與逾時控制 (Retries & Timeout)**
-  * *提示詞*：「我需要在 LiteLLM Router 設定中加入全域的重試（Retries）與逾時（Timeout）限制。請修改我的 `config.yaml`，設定連線逾時為 10 秒，且在遇到 5xx 錯誤時自動重試 3 次，並在 Python SDK 端示範如何也設定個別呼叫的 timeout。」
+- Primary、retry、fallback 的順序可由 log 或 trace 證明。
+- `mock_testing_fallbacks` 明確放在 request body 或 SDK 呼叫參數。
+- 全部 provider 失敗時回傳受控錯誤。
+- Health probes 的用途、頻率、認證與成本均有定義。

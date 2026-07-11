@@ -1,85 +1,32 @@
 ---
 name: litellm-observability
-description: 設定、教學或審查 LiteLLM logging、callbacks、OpenTelemetry、request/response observability、spend logs 與除錯流程時使用。
+description: 設定或審查 LiteLLM callbacks、logging、OpenTelemetry、request correlation、spend logs 與故障診斷。當任務要追蹤延遲、tokens、cost、provider、fallback 或 guardrail 事件時使用；權限政策與 guardrail 規則改用安全技能。
 ---
 
 # LiteLLM Observability
 
-## 使用時機
-
-當任務需要知道 LiteLLM 請求怎麼走、哪個模型慢、哪個 key 花錢、哪個 guardrail 或 provider 失敗，或要串接 Langfuse、MLflow、Helicone、Lunary、OpenTelemetry、Datadog 等工具時，使用此技能。
-
-## 官方依據
-
-- Getting Started - Logging & Observability：https://docs.litellm.ai/docs/
-- Proxy Logging：https://docs.litellm.ai/docs/proxy/logging
-- OpenTelemetry integration：https://docs.litellm.ai/docs/observability/opentelemetry_integration
-- Custom callbacks：https://docs.litellm.ai/docs/observability/custom_callback
-- Modify / Reject Incoming Requests：https://docs.litellm.ai/docs/proxy/call_hooks
-- Spend Tracking：https://docs.litellm.ai/docs/proxy/cost_tracking
-- Life of a Request：https://docs.litellm.ai/docs/proxy/architecture
-
 ## 工作流程
 
-1. 先決定觀測層級：SDK callback、Proxy callback、Proxy logging、OpenTelemetry trace、spend logs 或外部觀測平台。
-2. 定義必須追蹤的欄位：request id、user、team、key alias、model alias、provider、latency、tokens、cost、status、fallback、guardrail result。
-3. SDK 任務可用 `litellm.success_callback` 或自訂 callback 擷取 `response_cost`。
-4. Proxy 任務可在 `config.yaml` 設定 `litellm_settings.success_callback`、`failure_callback` 或 `callbacks`。
-5. 若要全請求 trace，評估 OpenTelemetry v2，並以環境變數啟用。
-6. 若紀錄 request/response，先確認是否包含個資、商業資料、學生作業或 secret。
-7. 對大型 payload 設定截斷策略，避免 debug log 造成成本與資料外洩。
-8. 建立錯誤分類：auth、rate limit、provider error、timeout、budget exceeded、guardrail blocked、MCP failure。
-9. 建立課堂儀表板或輸出表格，讓學生能看見同一任務在不同模型上的 latency、tokens 與 cost。
-10. 交付時附上「如何重現與查詢」步驟，而不只附截圖。
+1. 定義診斷問題、必要欄位、資料分類、保留期限與存取者。
+2. 選擇 SDK callback、Proxy logging、OpenTelemetry 或外部平台。
+3. 查核 LiteLLM 版本、callback schema、OpenTelemetry v1/v2 與額外套件。
+4. 預設不傳完整 prompt、response、secret 或敏感 metadata 到第三方。
+5. 建立 request ID 關聯 client、Proxy、provider、guardrail、MCP 與 DB 事件。
+6. 測試成功、provider error、timeout、budget exceeded、fallback 與 guardrail blocked。
+7. 交付查詢方式、重現步驟與實際 trace 證據。
 
-## Proxy 設定範例
+需要安全設定、OpenTelemetry 注意事項與實驗規格時，讀取 [實驗與參考](references/guide.md)。
 
-```yaml
-model_list:
-  - model_name: course-chat
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
+## 安全底線
 
-litellm_settings:
-  success_callback: ["langfuse"]
-  failure_callback: ["langfuse"]
-```
+- 第三方觀測預設關閉 message logging。
+- 不把 API key、Authorization header、資料庫 URL 或完整敏感內容寫入 log。
+- 啟用內容記錄前必須完成資料分類、遮罩、保留期限及第三方資料處理審查。
+- Failure callback 也必須套用相同的遮罩政策。
 
-## OpenTelemetry 檢查
+## 驗收
 
-- 設定 OTEL exporter、endpoint 與 headers。
-- 若使用 LiteLLM Proxy 的 OpenTelemetry v2，確認 `LITELLM_OTEL_V2=true`。
-- 確認 trace 能串起 HTTP request、auth、guardrails、LLM call 與 DB writes。
-- 在非正式環境先測試 request/response attributes 是否符合隱私政策。
-
-## 教學練習
-
-- 寫一個 SDK success callback，印出 cost、model 與 total tokens。
-- 在 proxy 開啟一個 logging callback，讓學生比較成功與失敗請求的欄位。
-- 用 tags 分組後，查詢每個 lab 的 spend。
-- 模擬 rate limit 與 budget exceeded，要求學生從 logs 判斷失敗原因。
-
-## 驗收檢查
-
-- 每個請求能被追到 key、user 或 team。
-- 成本、latency、model、provider 與錯誤類型可查。
-- logging 不會永久保存未遮罩 secret 或敏感內容。
-- OpenTelemetry 設定有實際 trace 證據，不只是環境變數。
-- 學生能用觀測資料解釋一次 fallback 或 guardrail 事件。
-
-## 常見錯誤
-
-- 把 debug log 當正式觀測方案。
-- 只紀錄成功請求，導致無法分析 provider error 或 budget exceeded。
-- 沒有 request id，無法把 client log、proxy log 與 provider log 串起來。
-- 把完整 prompt/response 傳到第三方平台前未做資料分類。
-
-## 使用情境與提示詞範例
-
-- **情境 1：設定全域 Logging 與 Webhook Callbacks**
-  * *提示詞*：「我想在 LiteLLM Proxy 中加入自訂的 logging callback。當每次 API 呼叫成功或失敗時，能將請求與回應的 token 用量、模型名稱發送到我指定的 Slack webhook。請幫我設計這個 config 與實作邏輯。」
-- **情境 2：與 OpenTelemetry / Langfuse 整合**
-  * *提示詞*：「為了教學展示，我想將 LiteLLM Proxy 的呼叫軌跡（Traces）同步到 Langfuse 進行可觀測性分析。請提供完整的 `config.yaml` 設定範例，包含如何安全地傳遞 Langfuse 的 public key 和 secret key。」
-- **情境 3：使用內建 Prometheus 指標監控**
-  * *提示詞*：「我想在 Kubernetes 部署 LiteLLM Proxy 並使用 Prometheus 來監控請求延遲（latency）和錯誤率。請教我如何在 `config.yaml` 中啟用 Prometheus telemetry 指標，並列出常用的 Prometheus query 語法。」
+- 每個請求可由 request ID 關聯必要事件。
+- 成功與至少四種失敗類型可查。
+- Trace 或 log 不包含測試 secret 與未遮罩敏感資料。
+- 查詢結果能解釋一次 fallback 或 guardrail 事件。

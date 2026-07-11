@@ -1,6 +1,6 @@
 # LiteLLM 官方 `litellm-skills` 完整使用教學
 
-> 查證日期：2026-07-11  
+> 查證日期：2026-07-11
 > 官方儲存庫基準：[`b13e7fc1bf2c3149625bcf5964fee2881fd3d027`](https://github.com/BerriAI/litellm-skills/tree/b13e7fc1bf2c3149625bcf5964fee2881fd3d027)
 
 LiteLLM 官方 `litellm-skills` 是一組符合 Agent Skills 格式的操作指令，讓支援該標準的 agent 使用 `curl` 管理正在執行的 LiteLLM Proxy。它不是 LiteLLM Python SDK，也不是只產生 `config.yaml` 的教學內容；它會直接呼叫 Proxy 管理 API，建立、修改或刪除正式資源。[官方說明](https://docs.litellm.ai/docs/tutorials/claude_code_skills)
@@ -76,23 +76,24 @@ https://litellm.example.com
 
 ### 4.1 官方快速安裝方式
 
-官方 README 提供以下命令：
+使用 Skills CLI 將官方 repo 的全部 skills 安裝到 Codex：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BerriAI/litellm-skills/main/install.sh | sh
+npx skills add BerriAI/litellm-skills --skill '*' --agent codex -y
 ```
 
-該腳本會：
+命令參數如下：
 
-1. 把 repo clone 到 `~/.claude/skills/litellm`。
-2. 若該目錄已是 Git repo，執行 `git pull --ff-only`。
-3. 對 repo 第一層的每個目錄，在 `~/.claude/skills/` 建立符號連結。
+- `BerriAI/litellm-skills`：官方 GitHub repo。
+- `--skill '*'`：安裝 repo 中的全部 skills。
+- `--agent codex`：指定安裝目標為 Codex。
+- `-y`：略過互動式確認。
 
-可直接閱讀[官方安裝腳本](https://github.com/BerriAI/litellm-skills/blob/b13e7fc1bf2c3149625bcf5964fee2881fd3d027/install.sh)。
+安裝完成後，重新載入 Codex 的 skills，並確認官方 skill 已可被發現。
 
-### 4.2 建議的可審查安裝方式
+### 4.2 可審查的替代方式
 
-**正式環境不應直接執行從可變 `main` 分支下載的 shell script。** 建議固定 commit，先審查再安裝：
+`npx skills add` 會依 repo 目前狀態安裝。正式環境若需要可重現版本，先固定 commit 並審查內容：
 
 ```sh
 git clone https://github.com/BerriAI/litellm-skills.git
@@ -102,19 +103,28 @@ git verify-commit b13e7fc1bf2c3149625bcf5964fee2881fd3d027 || true
 sed -n '1,240p' install.sh
 ```
 
-`git verify-commit` 只有在該 commit 具有可驗證簽章時才會成功；失敗不等於內容必然有問題，但表示不能以簽章確認來源。審查完成後再執行：
+`git verify-commit` 只有在該 commit 具有可驗證簽章時才會成功；失敗不等於內容必然有問題，但表示不能以簽章確認來源。完成審查後，先確認 Skills CLI 是否支援從 local source 或指定 commit 安裝：
 
 ```sh
-sh install.sh
+npx skills add --help
 ```
 
-安裝腳本固定寫入 Claude Code 路徑。其他 Agent Skills 客戶端可能使用不同目錄，因此不能假設腳本適用所有客戶端。
+不要再混用舊的 `install.sh` 符號連結流程。
 
 ### 4.3 確認安裝結果
+
+#### Claude Code
 
 ```sh
 find "$HOME/.claude/skills" -maxdepth 1 -type l -print
 git -C "$HOME/.claude/skills/litellm" rev-parse HEAD
+```
+
+#### 標準技能目錄 / Codex CLI / GitHub Copilot / Antigravity CLI
+
+```sh
+find "$HOME/.agents/skills" -maxdepth 1 -type l -print
+git -C "$HOME/.agents/skills/litellm" rev-parse HEAD
 ```
 
 重新啟動或重新載入 Agent Skills 客戶端後，確認 `/add-model`、`/add-user` 或 `/view-usage` 能被發現。
@@ -512,42 +522,42 @@ curl -s "$BASE/tag/daily/activity?tags=job:nightly-eval&start_date=2026-07-01&en
 
 ## 18. 升級、回復與卸載
 
-### 18.1 官方腳本的升級行為
+### 18.1 Skills CLI 的升級行為
 
-再次執行 `install.sh` 時，如果 `~/.claude/skills/litellm/.git` 存在，腳本會執行：
+再次執行安裝命令時，Skills CLI 會依目前 repo 狀態重新解析並更新指定 agent 的 skills：
 
 ```sh
-git -C "$HOME/.claude/skills/litellm" pull --ff-only
+npx skills add BerriAI/litellm-skills --skill '*' --agent codex -y
 ```
 
-這會跟隨遠端預設分支，不會維持先前固定的 commit。
+這個命令追蹤 repo 的目前狀態，不會自動固定先前使用的 commit。
 
 ### 18.2 建議升級流程
 
 ```sh
-cd "$HOME/.claude/skills/litellm"
-git fetch origin
-git log --oneline HEAD..origin/main
-git diff HEAD..origin/main -- '*/SKILL.md' install.sh
+npx skills add --help
+git clone https://github.com/BerriAI/litellm-skills.git /tmp/litellm-skills-review
+git -C /tmp/litellm-skills-review log --oneline -5
+find /tmp/litellm-skills-review -name SKILL.md -print | sort
 ```
 
-審查 API endpoint、欄位、allowed tools 與安裝腳本後，再 checkout 已核准 commit。升級失敗時可 checkout 上一個已知良好 commit。
+審查 API endpoint、欄位、allowed tools 與 `SKILL.md` 後，再依 Skills CLI 的目前說明安裝。若需要嚴格固定 commit，必須先確認目前 CLI 支援的 local source 或 commit 參數，不應假設 repo 的可變分支具備可重現性。
 
 ### 18.3 卸載
 
-官方 repo 沒有提供卸載腳本。依目前 `install.sh` 的行為，卸載時應：
+Skills CLI 管理安裝目錄；卸載前先查看目前 CLI 支援的命令：
 
-1. 先列出指向 `~/.claude/skills/litellm/*/` 的符號連結。
-2. 只移除這些已確認屬於官方 repo 的符號連結。
-3. 再移除 `~/.claude/skills/litellm` clone。
+```sh
+npx skills --help
+```
 
-不要以廣泛 wildcard 刪除 `~/.claude/skills/*`，該目錄可能包含其他使用者 skills。
+不要以廣泛 wildcard 刪除任何 skills 目錄，該目錄可能包含其他使用者 skills。
 
 * * *
 
 ## 19. 已確認的限制
 
-- 官方安裝腳本固定針對 `~/.claude/skills`，不是通用客戶端安裝器。
+- Skills CLI 會依 `--agent codex` 管理 Codex 的安裝目錄，不應假設所有客戶端共用同一個 skills 路徑。
 - 固定基準只有 `view-usage` 的專門測試檔；不能據此推定其餘 21 個 skills 都有自動整合測試。
 - 多數範例直接使用 `curl -s`，沒有一致展示 HTTP status 檢查。
 - 部分 `SKILL.md` 仍連到舊的 `litellm.vercel.app` 文件網址；使用時應改由目前 `docs.litellm.ai` 文件交叉查核。

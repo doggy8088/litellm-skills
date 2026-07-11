@@ -23,11 +23,15 @@ def main() -> int:
         *ROOT.glob("litellm-*/**/*.md"),
         *ROOT.glob("docs/**/*.md"),
         *ROOT.glob("curriculum/**/*.md"),
+        *ROOT.glob("examples/**/*.md"),
     ]
     for path in paths:
         for url in URL_RE.findall(path.read_text(encoding="utf-8")):
             cleaned = url.rstrip('`\'".,;:')
-            if urlparse(cleaned).hostname in {"example.com", "litellm.example.com"}:
+            hostname = urlparse(cleaned).hostname or ""
+            if hostname in {"example.com", "litellm.example.com"} or any(
+                marker in cleaned for marker in ("<", ">", "${", "your-resource")
+            ):
                 continue
             urls.add(cleaned)
 

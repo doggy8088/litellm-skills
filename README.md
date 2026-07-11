@@ -1,6 +1,6 @@
 # LiteLLM 教學 Agent Skills
 
-本專案提供 7 個以教學與實作引導為目的的 LiteLLM Agent Skills。它們不取代 LiteLLM 官方用於管理 live proxy 的 skills。
+本專案提供 7 個以教學與實作引導為目的的 LiteLLM Agent Skills。它們不取代 LiteLLM 官方用於管理 live proxy 的 [skills](https://github.com/BerriAI/litellm-skills)。
 
 * * *
 

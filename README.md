@@ -56,6 +56,12 @@ python scripts/validate_skills.py
 
 * * *
 
+## LiteLLM provider/model 範例
+
+參考 [BYOK Forge LiteLLM provider/model 範例](examples/litellm-byok-forge/)，可取得 14 個 providers、41 個 provider/model 個別設定，以及包含全部組合的 `all-models.yaml`。
+
+* * *
+
 ## 共通安全與維護原則
 
 - 需要版本、模型、價格、功能或授權方案資訊時，重新查核 LiteLLM 官方文件或官方 GitHub。

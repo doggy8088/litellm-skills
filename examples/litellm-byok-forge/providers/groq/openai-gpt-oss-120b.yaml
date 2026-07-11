@@ -1,0 +1,16 @@
+# Groq — openai/gpt-oss-120b
+# Source: doggy8088/byok-forge / litellm.html
+# Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
+# API keys are loaded at runtime from environment variables.
+
+model_list:
+  - model_name: "groq__openai-gpt-oss-120b"
+    litellm_params:
+      model: "groq/openai/gpt-oss-120b"
+      api_key: os.environ/GROQ_API_KEY
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

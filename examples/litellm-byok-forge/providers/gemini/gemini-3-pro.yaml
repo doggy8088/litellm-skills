@@ -1,0 +1,16 @@
+# Google Gemini — gemini-3-pro
+# Source: doggy8088/byok-forge / litellm.html
+# Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
+# API keys are loaded at runtime from environment variables.
+
+model_list:
+  - model_name: "gemini__gemini-3-pro"
+    litellm_params:
+      model: "gemini/gemini-3-pro"
+      api_key: os.environ/GEMINI_API_KEY
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

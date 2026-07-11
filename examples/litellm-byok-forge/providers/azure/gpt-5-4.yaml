@@ -1,0 +1,18 @@
+# Azure OpenAI — gpt-5.4
+# Source: doggy8088/byok-forge / litellm.html
+# Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
+# API keys are loaded at runtime from environment variables.
+
+model_list:
+  - model_name: "azure__gpt-5-4"
+    litellm_params:
+      model: "azure/gpt-5.4"
+      api_key: os.environ/AZURE_API_KEY
+      api_base: "https://YOUR-RESOURCE.openai.azure.com"
+      api_version: "2025-04-01-preview"
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

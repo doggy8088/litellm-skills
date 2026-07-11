@@ -1,0 +1,16 @@
+# OpenRouter — anthropic/claude-opus-4.8
+# Source: doggy8088/byok-forge / litellm.html
+# Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
+# API keys are loaded at runtime from environment variables.
+
+model_list:
+  - model_name: "openrouter__anthropic-claude-opus-4-8"
+    litellm_params:
+      model: "openrouter/anthropic/claude-opus-4.8"
+      api_key: os.environ/OPENROUTER_API_KEY
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

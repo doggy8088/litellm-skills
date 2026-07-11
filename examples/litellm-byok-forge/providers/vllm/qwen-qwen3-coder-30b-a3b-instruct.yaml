@@ -1,0 +1,17 @@
+# vLLM (hosted) — Qwen/Qwen3-Coder-30B-A3B-Instruct
+# Source: doggy8088/byok-forge / litellm.html
+# Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
+# API keys are loaded at runtime from environment variables.
+
+model_list:
+  - model_name: "vllm__qwen-qwen3-coder-30b-a3b-instruct"
+    litellm_params:
+      model: "hosted_vllm/Qwen/Qwen3-Coder-30B-A3B-Instruct"
+      api_key: os.environ/VLLM_API_KEY
+      api_base: "http://localhost:8000/v1"
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

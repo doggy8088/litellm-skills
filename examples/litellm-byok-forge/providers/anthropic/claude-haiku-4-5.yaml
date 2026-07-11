@@ -1,0 +1,16 @@
+# Anthropic — claude-haiku-4-5
+# Source: doggy8088/byok-forge / litellm.html
+# Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
+# API keys are loaded at runtime from environment variables.
+
+model_list:
+  - model_name: "anthropic__claude-haiku-4-5"
+    litellm_params:
+      model: "anthropic/claude-haiku-4-5"
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

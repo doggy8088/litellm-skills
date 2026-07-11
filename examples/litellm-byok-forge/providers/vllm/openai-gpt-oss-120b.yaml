@@ -1,0 +1,17 @@
+# vLLM (hosted) — openai/gpt-oss-120b
+# Source: doggy8088/byok-forge / litellm.html
+# Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
+# API keys are loaded at runtime from environment variables.
+
+model_list:
+  - model_name: "vllm__openai-gpt-oss-120b"
+    litellm_params:
+      model: "hosted_vllm/openai/gpt-oss-120b"
+      api_key: os.environ/VLLM_API_KEY
+      api_base: "http://localhost:8000/v1"
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

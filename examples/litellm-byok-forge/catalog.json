@@ -1,0 +1,173 @@
+{
+  "source": {
+    "repository": "doggy8088/byok-forge",
+    "commit": "6b1d5012cbe0391817a79387894db2493de3b047",
+    "file": "litellm.html",
+    "page": "https://byok-forge.gh.miniasp.com/litellm.html",
+    "extracted_at": "2026-07-12"
+  },
+  "providers": [
+    {
+      "id": "mistral",
+      "name": "Mistral",
+      "prefix": "mistral",
+      "env": "MISTRAL_API_KEY",
+      "models": [
+        "mistral-medium-latest",
+        "mistral-large-latest",
+        "devstral-2512",
+        "magistral-medium-latest"
+      ]
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "prefix": "deepseek",
+      "env": "DEEPSEEK_API_KEY",
+      "models": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ]
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "prefix": "anthropic",
+      "env": "ANTHROPIC_API_KEY",
+      "models": [
+        "claude-opus-4-8",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5"
+      ]
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "prefix": "gemini",
+      "env": "GEMINI_API_KEY",
+      "models": [
+        "gemini-3-pro",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash"
+      ]
+    },
+    {
+      "id": "cerebras",
+      "name": "Cerebras",
+      "prefix": "cerebras",
+      "env": "CEREBRAS_API_KEY",
+      "models": [
+        "qwen-3-coder-480b",
+        "llama-3.3-70b",
+        "gpt-oss-120b"
+      ]
+    },
+    {
+      "id": "together",
+      "name": "Together AI",
+      "prefix": "together_ai",
+      "env": "TOGETHER_API_KEY",
+      "models": [
+        "deepseek-ai/DeepSeek-V3.1",
+        "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+        "moonshotai/Kimi-K2-Instruct"
+      ]
+    },
+    {
+      "id": "fireworks",
+      "name": "Fireworks",
+      "prefix": "fireworks_ai",
+      "env": "FIREWORKS_API_KEY",
+      "models": [
+        "accounts/fireworks/models/deepseek-v3p1",
+        "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct"
+      ]
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "prefix": "groq",
+      "env": "GROQ_API_KEY",
+      "models": [
+        "openai/gpt-oss-120b",
+        "llama-3.3-70b-versatile",
+        "moonshotai/kimi-k2-instruct"
+      ]
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "prefix": "openai",
+      "env": "OPENAI_API_KEY",
+      "models": [
+        "gpt-5.5",
+        "gpt-5.4",
+        "o3",
+        "o4-mini"
+      ]
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter",
+      "prefix": "openrouter",
+      "env": "OPENROUTER_API_KEY",
+      "models": [
+        "anthropic/claude-opus-4.8",
+        "x-ai/grok-4.3",
+        "deepseek/deepseek-chat"
+      ]
+    },
+    {
+      "id": "xai",
+      "name": "xAI Grok",
+      "prefix": "xai",
+      "env": "XAI_API_KEY",
+      "models": [
+        "grok-4.3",
+        "grok-code-fast"
+      ]
+    },
+    {
+      "id": "azure",
+      "name": "Azure OpenAI",
+      "prefix": "azure",
+      "env": "AZURE_API_KEY",
+      "needs_base": true,
+      "needs_version": true,
+      "base_default": "https://YOUR-RESOURCE.openai.azure.com",
+      "version_default": "2025-04-01-preview",
+      "models": [
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-4.1"
+      ]
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama (local)",
+      "prefix": "ollama_chat",
+      "env": "",
+      "keyless": true,
+      "needs_base": true,
+      "base_default": "http://localhost:11434",
+      "models": [
+        "qwen3-coder:30b",
+        "llama3.3:70b",
+        "deepseek-r1:8b",
+        "devstral"
+      ]
+    },
+    {
+      "id": "vllm",
+      "name": "vLLM (hosted)",
+      "prefix": "hosted_vllm",
+      "env": "VLLM_API_KEY",
+      "needs_base": true,
+      "base_default": "http://localhost:8000/v1",
+      "models": [
+        "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        "openai/gpt-oss-120b"
+      ]
+    }
+  ]
+}

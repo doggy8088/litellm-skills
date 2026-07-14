@@ -5,7 +5,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${LITELLM_PORT:-4000}:4000"
+      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     restart: unless-stopped

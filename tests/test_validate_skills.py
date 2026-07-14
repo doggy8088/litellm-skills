@@ -36,6 +36,30 @@ class ValidatorUnitTests(unittest.TestCase):
         self.assertEqual(metadata["description"], "使用此技能處理範例")
         self.assertEqual(errors, [])
 
+    def test_parse_frontmatter_accepts_spec_optional_fields(self) -> None:
+        errors: list[str] = []
+        path = self.validator.ROOT / "example-skill" / "SKILL.md"
+        metadata = self.validator.parse_frontmatter(
+            path,
+            (
+                "---\n"
+                "name: example-skill\n"
+                "description: >\n"
+                "  使用此技能處理範例\n"
+                "license: MIT\n"
+                "compatibility: Requires Python 3.12\n"
+                "metadata:\n"
+                "  version: '1.0'\n"
+                "allowed-tools: Read Bash(git:*)\n"
+                "---\n"
+            ),
+            errors,
+        )
+
+        self.assertEqual(metadata["license"], "MIT")
+        self.assertEqual(metadata["metadata"], {"version": "1.0"})
+        self.assertEqual(errors, [])
+
     def test_validate_fences_accepts_valid_python(self) -> None:
         errors: list[str] = []
         path = self.validator.ROOT / "example.md"
@@ -65,6 +89,16 @@ class ValidatorUnitTests(unittest.TestCase):
             errors,
         )
         self.assertEqual(len(errors), 1)
+
+    def test_validate_fences_accepts_tilde_yaml(self) -> None:
+        errors: list[str] = []
+        path = self.validator.ROOT / "example.md"
+        self.validator.validate_fences(
+            path,
+            "~~~yaml\nmodel_list:\n  - model_name: test\n~~~\n",
+            errors,
+        )
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":

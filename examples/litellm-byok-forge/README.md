@@ -162,3 +162,9 @@ python3 scripts/generate_byok_forge_examples.py --refresh-ollama-cloud
 ```
 
 `--refresh-ollama-cloud` 會從 Ollama Cloud 官方 `/api/tags` 重新取得直接 API 模型名稱、更新 `catalog.json` 的查核日期，再產生 111 份個別 YAML、`all-models.yaml`、`model-catalog.md`、`ollama-cloud-models.md` 與 `.env.example`。本機登入後的 36 個 `:cloud` 變體是依官方 model library 查核後保存的 snapshot；若 model library 改變，請同步更新 `catalog.json` 的 `ollama_cloud_local` 區段與來源日期。不使用旗標時，產生器只依現有 `catalog.json` 重建檔案。產生器會驗證 provider id 與 model alias 不重複。不要手動把真實憑證填入產生檔後再提交。
+
+提交前使用唯讀模式確認 catalog 與全部生成物同步：
+
+```sh
+python3 scripts/generate_byok_forge_examples.py --check
+```

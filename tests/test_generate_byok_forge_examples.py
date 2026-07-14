@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -86,6 +87,27 @@ class GeneratorUnitTests(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 self.generator.refresh_ollama_cloud_catalog(catalog)
+
+    def test_check_outputs_reports_missing_extra_and_changed_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            examples = Path(directory)
+            (examples / "providers" / "old").mkdir(parents=True)
+            (examples / "providers" / "old" / "stale.yaml").write_text(
+                "stale",
+                encoding="utf-8",
+            )
+            (examples / "all-models.yaml").write_text("old", encoding="utf-8")
+            outputs = {
+                Path("providers/new/model.yaml"): "model",
+                Path("all-models.yaml"): "new",
+            }
+
+            with mock.patch.object(self.generator, "EXAMPLES", examples):
+                errors = self.generator.check_outputs(outputs)
+
+        self.assertTrue(any("缺少生成檔" in error for error in errors))
+        self.assertTrue(any("多餘生成檔" in error for error in errors))
+        self.assertTrue(any("生成內容不同步" in error for error in errors))
 
 
 if __name__ == "__main__":

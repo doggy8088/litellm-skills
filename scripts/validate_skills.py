@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the repository's Agent Skills without third-party dependencies."""
+"""Validate Agent Skills, documentation, fixtures, and checked-in examples."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import json
 import re
 import sys
 from pathlib import Path
+
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,15 +24,24 @@ FORBIDDEN_TEXT = {
     "文檔": "文件",
     "集群": "叢集",
 }
-FENCE_RE = re.compile(r"^```([A-Za-z0-9_+-]*)\s*$")
+FENCE_RE = re.compile(r"^(```|~~~)([A-Za-z0-9_+-]*)\s*$")
+LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+FRONTMATTER_FIELDS = {
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "metadata",
+    "allowed-tools",
+}
 
 
 def fail(errors: list[str], path: Path, message: str) -> None:
     errors.append(f"{path.relative_to(ROOT)}: {message}")
 
 
-def parse_frontmatter(path: Path, text: str, errors: list[str]) -> dict[str, str]:
+def parse_frontmatter(path: Path, text: str, errors: list[str]) -> dict[str, object]:
     lines = text.splitlines()
     if not lines or lines[0] != "---":
         fail(errors, path, "缺少 YAML frontmatter 起始分隔線")
@@ -41,30 +52,31 @@ def parse_frontmatter(path: Path, text: str, errors: list[str]) -> dict[str, str
         fail(errors, path, "缺少 YAML frontmatter 結束分隔線")
         return {}
 
-    data: dict[str, str] = {}
-    for line in lines[1:end]:
-        if not line.strip():
-            continue
-        if ":" not in line:
-            fail(errors, path, f"無法解析 frontmatter 行：{line}")
-            continue
-        key, value = line.split(":", 1)
-        data[key.strip()] = value.strip().strip('"').strip("'")
+    try:
+        data = yaml.safe_load("\n".join(lines[1:end]))
+    except yaml.YAMLError as exc:
+        fail(errors, path, f"YAML frontmatter 無法解析：{exc}")
+        return {}
+    if not isinstance(data, dict):
+        fail(errors, path, "YAML frontmatter 必須是 mapping")
+        return {}
     return data
 
 
 def validate_fences(path: Path, text: str, errors: list[str]) -> None:
-    open_fence: tuple[str, int, list[str]] | None = None
+    open_fence: tuple[str, str, int, list[str]] | None = None
     for lineno, line in enumerate(text.splitlines(), 1):
         match = FENCE_RE.match(line)
-        if not match:
-            if open_fence:
-                open_fence[2].append(line)
-            continue
         if open_fence is None:
-            open_fence = (match.group(1).lower(), lineno, [])
+            if match:
+                open_fence = (match.group(1), match.group(2).lower(), lineno, [])
             continue
-        language, start, body = open_fence
+
+        marker, language, start, body = open_fence
+        if not match or match.group(1) != marker or match.group(2):
+            body.append(line)
+            continue
+
         content = "\n".join(body)
         try:
             if language in {"python", "py"}:
@@ -72,17 +84,66 @@ def validate_fences(path: Path, text: str, errors: list[str]) -> None:
             elif language == "json":
                 json.loads(content)
             elif language in {"yaml", "yml"}:
-                for offset, yaml_line in enumerate(body):
-                    stripped = yaml_line.strip()
-                    if "\t" in yaml_line:
-                        raise ValueError(f"第 {start + offset + 1} 行含 tab")
-                    if stripped and not stripped.startswith(("#", "-")) and ":" not in stripped:
-                        raise ValueError(f"第 {start + offset + 1} 行缺少冒號")
-        except (SyntaxError, json.JSONDecodeError, ValueError) as exc:
+                yaml.safe_load(content)
+        except (SyntaxError, json.JSONDecodeError, yaml.YAMLError) as exc:
             fail(errors, path, f"第 {start} 行的 {language} code fence 無法解析：{exc}")
         open_fence = None
     if open_fence:
-        fail(errors, path, f"第 {open_fence[1]} 行的 code fence 未關閉")
+        fail(errors, path, f"第 {open_fence[2]} 行的 code fence 未關閉")
+
+
+def validate_relative_links(path: Path, text: str, errors: list[str]) -> None:
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for raw_target in LINK_RE.findall(line):
+            target = raw_target.strip().split(maxsplit=1)[0].strip("<>")
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            relative_target = target.split("#", 1)[0]
+            if relative_target and not (path.parent / relative_target).exists():
+                fail(errors, path, f"第 {lineno} 行的相對連結不存在：{target}")
+
+
+def validate_data_files(errors: list[str]) -> None:
+    for path in sorted([*ROOT.rglob("*.yaml"), *ROOT.rglob("*.yml")]):
+        if ".git" in path.parts:
+            continue
+        try:
+            yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError) as exc:
+            fail(errors, path, f"YAML 無法解析：{exc}")
+
+    for path in sorted(ROOT.rglob("*.json")):
+        if ".git" in path.parts:
+            continue
+        try:
+            json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            fail(errors, path, f"JSON 無法解析：{exc}")
+
+
+def validate_catalog_counts(errors: list[str]) -> None:
+    path = ROOT / "examples" / "litellm-byok-forge" / "catalog.json"
+    try:
+        catalog = json.loads(path.read_text(encoding="utf-8"))
+        providers = catalog["providers"]
+        provider_count = len(providers)
+        model_count = sum(len(provider["models"]) for provider in providers)
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        fail(errors, path, f"無法計算 catalog 統計：{exc}")
+        return
+
+    expected = {
+        ROOT / "README.md": [f"{provider_count} 個 providers、{model_count} 個"],
+        ROOT / "examples" / "litellm-byok-forge" / "README.md": [
+            f"共 {model_count} 份",
+            f"**{model_count}**",
+        ],
+    }
+    for document, snippets in expected.items():
+        text = document.read_text(encoding="utf-8")
+        for snippet in snippets:
+            if snippet not in text:
+                fail(errors, document, f"catalog 統計未同步：缺少 {snippet}")
 
 
 def main() -> int:
@@ -92,9 +153,13 @@ def main() -> int:
         errors.append(f"預期 7 個 skills，實際找到 {len(skills)} 個")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    for path in [ROOT / "README.md", *skills]:
+    markdown_paths = sorted(
+        path for path in ROOT.rglob("*.md") if ".git" not in path.parts
+    )
+    for path in markdown_paths:
         text = path.read_text(encoding="utf-8")
         validate_fences(path, text, errors)
+        validate_relative_links(path, text, errors)
         for forbidden, replacement in FORBIDDEN_TEXT.items():
             if forbidden in text:
                 fail(errors, path, f"包含禁用文字「{forbidden}」，應改為「{replacement}」")
@@ -104,14 +169,27 @@ def main() -> int:
         metadata = parse_frontmatter(path, text, errors)
         name = metadata.get("name", "")
         description = metadata.get("description", "")
-        if set(metadata) != {"name", "description"}:
-            fail(errors, path, "frontmatter 僅允許 name 與 description")
+        unknown_fields = set(metadata) - FRONTMATTER_FIELDS
+        if unknown_fields:
+            fail(errors, path, f"frontmatter 包含未知欄位：{sorted(unknown_fields)}")
+        if not isinstance(name, str) or not isinstance(description, str):
+            fail(errors, path, "name 與 description 必須是字串")
+            continue
         if name != path.parent.name:
             fail(errors, path, "name 必須與父目錄名稱一致")
         if not NAME_RE.fullmatch(name) or len(name) > 64:
             fail(errors, path, "name 不符合 Agent Skills 命名規格")
         if not description or len(description) > 1024 or "使用" not in description:
             fail(errors, path, "description 必須描述能力與使用時機")
+        compatibility = metadata.get("compatibility")
+        if compatibility is not None and (
+            not isinstance(compatibility, str) or not 1 <= len(compatibility) <= 500
+        ):
+            fail(errors, path, "compatibility 必須是 1–500 字元的字串")
+        if "metadata" in metadata and not isinstance(metadata["metadata"], dict):
+            fail(errors, path, "metadata 必須是 mapping")
+        if "allowed-tools" in metadata and not isinstance(metadata["allowed-tools"], str):
+            fail(errors, path, "allowed-tools 必須是字串")
         for section in REQUIRED_SECTIONS:
             if section not in text:
                 fail(errors, path, f"缺少必要章節標記：{section}")
@@ -138,6 +216,9 @@ def main() -> int:
     capstone = ROOT / "curriculum" / "capstone.md"
     if not capstone.is_file() or "## 完成定義" not in capstone.read_text(encoding="utf-8"):
         fail(errors, capstone, "缺少跨技能整合實驗或完成定義")
+
+    validate_data_files(errors)
+    validate_catalog_counts(errors)
 
     if errors:
         print("技能驗證失敗：", file=sys.stderr)

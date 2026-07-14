@@ -17,7 +17,10 @@
 維護者需使用 Python 3.10 以上版本；CI 基準為 Python 3.12。執行以下命令驗證全部技能：
 
 ```sh
+python3 -m pip install -r requirements-dev.txt
 python3 scripts/validate_skills.py
+python3 -m unittest discover -v
+python3 scripts/generate_byok_forge_examples.py --check
 ```
 
 外部連結由每週排程執行 `python3 scripts/check_links.py`；一般 pull request 不受暫時性網路錯誤影響。

@@ -289,23 +289,8 @@ def ollama_cloud_catalog_text(catalog: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="產生 LiteLLM provider/model 範例")
-    parser.add_argument(
-        "--refresh-ollama-cloud",
-        action="store_true",
-        help="先從 Ollama Cloud 官方 /api/tags 重新擷取模型清單",
-    )
-    args = parser.parse_args()
-
-    catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-    if args.refresh_ollama_cloud:
-        count = refresh_ollama_cloud_catalog(catalog)
-        CATALOG_PATH.write_text(
-            json.dumps(catalog, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        print(f"已從 Ollama Cloud 官方 API 更新 {count} 個模型")
+def render_outputs(catalog: dict[str, Any]) -> dict[Path, str]:
+    """Render every generated artifact without touching the working tree."""
 
     providers = catalog["providers"]
     entries = [(provider, model) for provider in providers for model in provider["models"]]
@@ -318,39 +303,107 @@ def main() -> int:
     if len(provider_ids) != len(set(provider_ids)):
         raise ValueError("catalog.json 有重複 provider id")
 
+    outputs: dict[Path, str] = {}
+    for provider, model in entries:
+        relative_path = Path("providers") / provider["id"] / f"{slug(model)}.yaml"
+        outputs[relative_path] = config_text(
+            catalog,
+            [(provider, model)],
+            title=f"{provider['name']} — {model}",
+        )
+
+    outputs[Path("all-models.yaml")] = config_text(
+        catalog,
+        entries,
+        title="All LiteLLM provider/model combinations",
+    )
+    outputs[Path(".env.example")] = env_example(catalog)
+    outputs[Path("model-catalog.md")] = model_catalog_text(catalog, entries)
+    outputs[Path("ollama-cloud-models.md")] = ollama_cloud_catalog_text(catalog)
+    return outputs
+
+
+def check_outputs(outputs: dict[Path, str]) -> list[str]:
+    """Return generated-artifact drift without modifying files."""
+
+    errors: list[str] = []
+    expected_provider_files = {
+        path for path in outputs if path.parts and path.parts[0] == "providers"
+    }
+    actual_provider_files = {
+        path.relative_to(EXAMPLES)
+        for path in (EXAMPLES / "providers").glob("*/*.yaml")
+    }
+    for path in sorted(expected_provider_files - actual_provider_files):
+        errors.append(f"缺少生成檔：{path}")
+    for path in sorted(actual_provider_files - expected_provider_files):
+        errors.append(f"多餘生成檔：{path}")
+
+    for path, expected in sorted(outputs.items(), key=lambda item: str(item[0])):
+        target = EXAMPLES / path
+        if not target.is_file():
+            if path not in expected_provider_files:
+                errors.append(f"缺少生成檔：{path}")
+            continue
+        if target.read_text(encoding="utf-8") != expected:
+            errors.append(f"生成內容不同步：{path}")
+    return errors
+
+
+def write_outputs(outputs: dict[Path, str]) -> None:
+    """Write rendered outputs using the legacy direct-update behavior."""
+
     provider_root = EXAMPLES / "providers"
     provider_root.mkdir(parents=True, exist_ok=True)
     for old_file in provider_root.glob("*/*.yaml"):
         old_file.unlink()
 
-    for provider, model in entries:
-        provider_dir = provider_root / provider["id"]
-        provider_dir.mkdir(parents=True, exist_ok=True)
-        output = provider_dir / f"{slug(model)}.yaml"
-        output.write_text(
-            config_text(
-                catalog,
-                [(provider, model)],
-                title=f"{provider['name']} — {model}",
-            ),
+    for relative_path, content in outputs.items():
+        target = EXAMPLES / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="產生 LiteLLM provider/model 範例")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--refresh-ollama-cloud",
+        action="store_true",
+        help="先從 Ollama Cloud 官方 /api/tags 重新擷取模型清單",
+    )
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="唯讀檢查 catalog 與所有生成物是否同步",
+    )
+    args = parser.parse_args()
+
+    catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    if args.refresh_ollama_cloud:
+        count = refresh_ollama_cloud_catalog(catalog)
+        CATALOG_PATH.write_text(
+            json.dumps(catalog, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+        print(f"已從 Ollama Cloud 官方 API 更新 {count} 個模型")
 
-    (EXAMPLES / "all-models.yaml").write_text(
-        config_text(catalog, entries, title="All LiteLLM provider/model combinations"),
-        encoding="utf-8",
-    )
-    (EXAMPLES / ".env.example").write_text(env_example(catalog), encoding="utf-8")
-    (EXAMPLES / "model-catalog.md").write_text(
-        model_catalog_text(catalog, entries),
-        encoding="utf-8",
-    )
-    (EXAMPLES / "ollama-cloud-models.md").write_text(
-        ollama_cloud_catalog_text(catalog),
-        encoding="utf-8",
-    )
+    outputs = render_outputs(catalog)
+    if args.check:
+        errors = check_outputs(outputs)
+        if errors:
+            for error in errors:
+                print(f"- {error}")
+            return 1
+        print(f"生成物檢查通過：{len(outputs)} 份檔案")
+        return 0
 
-    print(f"已產生 {len(providers)} 個 providers、{len(entries)} 個 provider/model 範例")
+    write_outputs(outputs)
+    model_count = sum(len(provider["models"]) for provider in catalog["providers"])
+    print(
+        f"已產生 {len(catalog['providers'])} 個 providers、"
+        f"{model_count} 個 provider/model 範例"
+    )
     return 0
 
 

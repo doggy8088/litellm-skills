@@ -1,0 +1,18 @@
+# Ollama Cloud — gemini-3-flash-preview
+# Source: doggy8088/byok-forge / litellm.html
+# Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
+# API keys are loaded at runtime from environment variables.
+# Provider model source: https://ollama.com/api/tags (retrieved 2026-07-12)
+
+model_list:
+  - model_name: "ollama_cloud__gemini-3-flash-preview"
+    litellm_params:
+      model: "ollama_chat/gemini-3-flash-preview"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

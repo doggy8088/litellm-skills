@@ -58,7 +58,9 @@ python scripts/validate_skills.py
 
 ## LiteLLM provider/model 範例
 
-參考 [BYOK Forge LiteLLM provider/model 範例](examples/litellm-byok-forge/)，可取得 14 個 providers、41 個 provider/model 個別設定，以及包含全部組合的 `all-models.yaml`。
+參考 [LiteLLM provider/model 範例](examples/litellm-byok-forge/)，可取得 16 個 providers、111 個 provider/model 個別設定，其中包含 Ollama Cloud 直接 API 的 34 個模型與本機登入後的 36 個 `:cloud` 變體，以及包含全部組合的 `all-models.yaml`。
+
+模型來源差異、查核方法與同步限制請見 [LiteLLM 與 Ollama Cloud 模型支援查核報告](docs/litellm-model-support-research.md)。
 
 * * *
 

@@ -1,7 +1,9 @@
-# All BYOK Forge LiteLLM provider/model combinations
+# All LiteLLM provider/model combinations
 # Source: doggy8088/byok-forge / litellm.html
 # Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
 # API keys are loaded at runtime from environment variables.
+# Provider model source: https://ollama.com/api/tags (retrieved 2026-07-12)
+# Provider model source: https://ollama.com/search?c=cloud (retrieved 2026-07-12)
 
 model_list:
   - model_name: "mistral__mistral-medium-latest"
@@ -168,21 +170,21 @@ model_list:
     litellm_params:
       model: "azure/gpt-5.5"
       api_key: os.environ/AZURE_API_KEY
-      api_base: "https://YOUR-RESOURCE.openai.azure.com"
+      api_base: "https://your-resource.openai.azure.com"
       api_version: "2025-04-01-preview"
 
   - model_name: "azure__gpt-5-4"
     litellm_params:
       model: "azure/gpt-5.4"
       api_key: os.environ/AZURE_API_KEY
-      api_base: "https://YOUR-RESOURCE.openai.azure.com"
+      api_base: "https://your-resource.openai.azure.com"
       api_version: "2025-04-01-preview"
 
   - model_name: "azure__gpt-4-1"
     litellm_params:
       model: "azure/gpt-4.1"
       api_key: os.environ/AZURE_API_KEY
-      api_base: "https://YOUR-RESOURCE.openai.azure.com"
+      api_base: "https://your-resource.openai.azure.com"
       api_version: "2025-04-01-preview"
 
   - model_name: "ollama__qwen3-coder-30b"
@@ -203,6 +205,390 @@ model_list:
   - model_name: "ollama__devstral"
     litellm_params:
       model: "ollama_chat/devstral"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud__deepseek-v3-1-671b"
+    litellm_params:
+      model: "ollama_chat/deepseek-v3.1:671b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__deepseek-v3-2"
+    litellm_params:
+      model: "ollama_chat/deepseek-v3.2"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__deepseek-v4-flash"
+    litellm_params:
+      model: "ollama_chat/deepseek-v4-flash"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__deepseek-v4-pro"
+    litellm_params:
+      model: "ollama_chat/deepseek-v4-pro"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__devstral-2-123b"
+    litellm_params:
+      model: "ollama_chat/devstral-2:123b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__devstral-small-2-24b"
+    litellm_params:
+      model: "ollama_chat/devstral-small-2:24b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__gemini-3-flash-preview"
+    litellm_params:
+      model: "ollama_chat/gemini-3-flash-preview"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__gemma3-12b"
+    litellm_params:
+      model: "ollama_chat/gemma3:12b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__gemma3-27b"
+    litellm_params:
+      model: "ollama_chat/gemma3:27b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__gemma3-4b"
+    litellm_params:
+      model: "ollama_chat/gemma3:4b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__gemma4-31b"
+    litellm_params:
+      model: "ollama_chat/gemma4:31b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__glm-4-7"
+    litellm_params:
+      model: "ollama_chat/glm-4.7"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__glm-5"
+    litellm_params:
+      model: "ollama_chat/glm-5"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__glm-5-1"
+    litellm_params:
+      model: "ollama_chat/glm-5.1"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__glm-5-2"
+    litellm_params:
+      model: "ollama_chat/glm-5.2"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__gpt-oss-120b"
+    litellm_params:
+      model: "ollama_chat/gpt-oss:120b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__gpt-oss-20b"
+    litellm_params:
+      model: "ollama_chat/gpt-oss:20b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__kimi-k2-5"
+    litellm_params:
+      model: "ollama_chat/kimi-k2.5"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__kimi-k2-6"
+    litellm_params:
+      model: "ollama_chat/kimi-k2.6"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__kimi-k2-7-code"
+    litellm_params:
+      model: "ollama_chat/kimi-k2.7-code"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__minimax-m2-1"
+    litellm_params:
+      model: "ollama_chat/minimax-m2.1"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__minimax-m2-5"
+    litellm_params:
+      model: "ollama_chat/minimax-m2.5"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__minimax-m2-7"
+    litellm_params:
+      model: "ollama_chat/minimax-m2.7"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__minimax-m3"
+    litellm_params:
+      model: "ollama_chat/minimax-m3"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__ministral-3-14b"
+    litellm_params:
+      model: "ollama_chat/ministral-3:14b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__ministral-3-3b"
+    litellm_params:
+      model: "ollama_chat/ministral-3:3b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__ministral-3-8b"
+    litellm_params:
+      model: "ollama_chat/ministral-3:8b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__mistral-large-3-675b"
+    litellm_params:
+      model: "ollama_chat/mistral-large-3:675b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__nemotron-3-nano-30b"
+    litellm_params:
+      model: "ollama_chat/nemotron-3-nano:30b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__nemotron-3-super"
+    litellm_params:
+      model: "ollama_chat/nemotron-3-super"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__nemotron-3-ultra"
+    litellm_params:
+      model: "ollama_chat/nemotron-3-ultra"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__qwen3-coder-next"
+    litellm_params:
+      model: "ollama_chat/qwen3-coder-next"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__qwen3-coder-480b"
+    litellm_params:
+      model: "ollama_chat/qwen3-coder:480b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud__qwen3-5-397b"
+    litellm_params:
+      model: "ollama_chat/qwen3.5:397b"
+      api_key: os.environ/OLLAMA_API_KEY
+      api_base: "https://ollama.com"
+
+  - model_name: "ollama_cloud_local__glm-5-2-cloud"
+    litellm_params:
+      model: "ollama_chat/glm-5.2:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__kimi-k2-7-code-cloud"
+    litellm_params:
+      model: "ollama_chat/kimi-k2.7-code:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__gemma4-cloud"
+    litellm_params:
+      model: "ollama_chat/gemma4:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__gemma4-31b-cloud"
+    litellm_params:
+      model: "ollama_chat/gemma4:31b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__qwen3-5-cloud"
+    litellm_params:
+      model: "ollama_chat/qwen3.5:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__qwen3-5-397b-cloud"
+    litellm_params:
+      model: "ollama_chat/qwen3.5:397b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__glm-5-1-cloud"
+    litellm_params:
+      model: "ollama_chat/glm-5.1:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__minimax-m2-7-cloud"
+    litellm_params:
+      model: "ollama_chat/minimax-m2.7:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__nemotron-3-super-cloud"
+    litellm_params:
+      model: "ollama_chat/nemotron-3-super:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__glm-5-cloud"
+    litellm_params:
+      model: "ollama_chat/glm-5:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__minimax-m2-5-cloud"
+    litellm_params:
+      model: "ollama_chat/minimax-m2.5:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__minimax-m3-cloud"
+    litellm_params:
+      model: "ollama_chat/minimax-m3:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__kimi-k2-6-cloud"
+    litellm_params:
+      model: "ollama_chat/kimi-k2.6:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__deepseek-v4-flash-cloud"
+    litellm_params:
+      model: "ollama_chat/deepseek-v4-flash:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__deepseek-v4-pro-cloud"
+    litellm_params:
+      model: "ollama_chat/deepseek-v4-pro:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__kimi-k2-5-cloud"
+    litellm_params:
+      model: "ollama_chat/kimi-k2.5:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__nemotron-3-ultra-cloud"
+    litellm_params:
+      model: "ollama_chat/nemotron-3-ultra:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__gpt-oss-20b-cloud"
+    litellm_params:
+      model: "ollama_chat/gpt-oss:20b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__gpt-oss-120b-cloud"
+    litellm_params:
+      model: "ollama_chat/gpt-oss:120b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__qwen3-coder-480b-cloud"
+    litellm_params:
+      model: "ollama_chat/qwen3-coder:480b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__glm-4-7-cloud"
+    litellm_params:
+      model: "ollama_chat/glm-4.7:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__gemini-3-flash-preview-cloud"
+    litellm_params:
+      model: "ollama_chat/gemini-3-flash-preview:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__minimax-m2-1-cloud"
+    litellm_params:
+      model: "ollama_chat/minimax-m2.1:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__deepseek-v3-2-cloud"
+    litellm_params:
+      model: "ollama_chat/deepseek-v3.2:cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__ministral-3-3b-cloud"
+    litellm_params:
+      model: "ollama_chat/ministral-3:3b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__ministral-3-8b-cloud"
+    litellm_params:
+      model: "ollama_chat/ministral-3:8b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__ministral-3-14b-cloud"
+    litellm_params:
+      model: "ollama_chat/ministral-3:14b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__devstral-small-2-24b-cloud"
+    litellm_params:
+      model: "ollama_chat/devstral-small-2:24b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__nemotron-3-nano-30b-cloud"
+    litellm_params:
+      model: "ollama_chat/nemotron-3-nano:30b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__deepseek-v3-1-671b-cloud"
+    litellm_params:
+      model: "ollama_chat/deepseek-v3.1:671b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__devstral-2-123b-cloud"
+    litellm_params:
+      model: "ollama_chat/devstral-2:123b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__mistral-large-3-675b-cloud"
+    litellm_params:
+      model: "ollama_chat/mistral-large-3:675b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__gemma3-4b-cloud"
+    litellm_params:
+      model: "ollama_chat/gemma3:4b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__gemma3-12b-cloud"
+    litellm_params:
+      model: "ollama_chat/gemma3:12b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__gemma3-27b-cloud"
+    litellm_params:
+      model: "ollama_chat/gemma3:27b-cloud"
+      api_base: "http://localhost:11434"
+
+  - model_name: "ollama_cloud_local__qwen3-coder-next-cloud"
+    litellm_params:
+      model: "ollama_chat/qwen3-coder-next:cloud"
       api_base: "http://localhost:11434"
 
   - model_name: "vllm__qwen-qwen3-coder-30b-a3b-instruct"

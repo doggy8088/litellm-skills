@@ -1,15 +1,14 @@
-# Azure OpenAI — gpt-5.5
+# Ollama Cloud (local signed-in) — deepseek-v3.2:cloud
 # Source: doggy8088/byok-forge / litellm.html
 # Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
 # API keys are loaded at runtime from environment variables.
+# Provider model source: https://ollama.com/search?c=cloud (retrieved 2026-07-12)
 
 model_list:
-  - model_name: "azure__gpt-5-5"
+  - model_name: "ollama_cloud_local__deepseek-v3-2-cloud"
     litellm_params:
-      model: "azure/gpt-5.5"
-      api_key: os.environ/AZURE_API_KEY
-      api_base: "https://your-resource.openai.azure.com"
-      api_version: "2025-04-01-preview"
+      model: "ollama_chat/deepseek-v3.2:cloud"
+      api_base: "http://localhost:11434"
 
 litellm_settings:
   drop_params: true

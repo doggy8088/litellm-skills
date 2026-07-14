@@ -1,0 +1,17 @@
+# Ollama Cloud (local signed-in) — devstral-small-2:24b-cloud
+# Source: doggy8088/byok-forge / litellm.html
+# Source commit: 6b1d5012cbe0391817a79387894db2493de3b047
+# API keys are loaded at runtime from environment variables.
+# Provider model source: https://ollama.com/search?c=cloud (retrieved 2026-07-12)
+
+model_list:
+  - model_name: "ollama_cloud_local__devstral-small-2-24b-cloud"
+    litellm_params:
+      model: "ollama_chat/devstral-small-2:24b-cloud"
+      api_base: "http://localhost:11434"
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

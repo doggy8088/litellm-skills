@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Generate LiteLLM YAML examples from the checked-in BYOK Forge catalog."""
+"""Generate LiteLLM YAML examples from the checked-in provider catalog."""
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples" / "litellm-byok-forge"
 CATALOG_PATH = EXAMPLES / "catalog.json"
+OLLAMA_CLOUD_TAGS_URL = "https://ollama.com/api/tags"
+OLLAMA_CLOUD_DOCS_URL = "https://docs.ollama.com/cloud"
 
 
 def slug(value: str) -> str:
@@ -52,6 +58,43 @@ def model_entry(provider: dict[str, Any], model: str) -> list[str]:
     return lines
 
 
+def refresh_ollama_cloud_catalog(catalog: dict[str, Any]) -> int:
+    """Refresh the Ollama Cloud model snapshot from Ollama's first-party API."""
+
+    provider = next(
+        (item for item in catalog["providers"] if item.get("id") == "ollama_cloud"),
+        None,
+    )
+    if provider is None:
+        raise ValueError("catalog.json 缺少 ollama_cloud provider")
+
+    request = urllib.request.Request(
+        OLLAMA_CLOUD_TAGS_URL,
+        headers={"Accept": "application/json", "User-Agent": "litellm-skills-catalog/1.0"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload = json.load(response)
+
+    names = sorted(
+        {
+            str(item.get("name") or item.get("model"))
+            for item in payload.get("models", [])
+            if isinstance(item, dict) and (item.get("name") or item.get("model"))
+        }
+    )
+    if not names:
+        raise ValueError("Ollama Cloud API 未回傳任何模型")
+
+    provider["models"] = names
+    provider["source"] = {
+        "type": "ollama-api-tags",
+        "url": OLLAMA_CLOUD_TAGS_URL,
+        "docs": OLLAMA_CLOUD_DOCS_URL,
+        "retrieved_at": datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat(),
+    }
+    return len(names)
+
+
 def config_text(
     catalog: dict[str, Any],
     entries: list[tuple[dict[str, Any], str]],
@@ -64,9 +107,26 @@ def config_text(
         f"# Source: {source['repository']} / {source['file']}",
         f"# Source commit: {source['commit']}",
         "# API keys are loaded at runtime from environment variables.",
-        "",
-        "model_list:",
     ]
+    entry_provider_ids = {id(provider) for provider, _ in entries}
+    provider_sources = {
+        provider_source["url"]: provider_source
+        for provider in catalog["providers"]
+        if id(provider) in entry_provider_ids
+        and (provider_source := provider.get("source"))
+        and provider_source.get("url")
+    }
+    for provider_source in provider_sources.values():
+        retrieved_at = provider_source.get("retrieved_at", "unknown")
+        lines.append(
+            f"# Provider model source: {provider_source['url']} (retrieved {retrieved_at})"
+        )
+    lines.extend(
+        [
+            "",
+            "model_list:",
+        ]
+    )
     for index, (provider, model) in enumerate(entries):
         if index:
             lines.append("")
@@ -104,6 +164,7 @@ def env_example(catalog: dict[str, Any]) -> str:
         [
             "",
             "# Azure api_base/api_version and local api_base values are kept in YAML.",
+            "# Ollama Cloud uses OLLAMA_API_KEY with https://ollama.com; local Ollama is keyless.",
             "# For Docker, replace localhost with host.docker.internal when needed.",
             "",
         ]
@@ -111,8 +172,141 @@ def env_example(catalog: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def model_catalog_text(
+    catalog: dict[str, Any], entries: list[tuple[dict[str, Any], str]]
+) -> str:
+    """Render a human-readable snapshot of every generated provider/model route."""
+
+    source = catalog["source"]
+    lines = [
+        "# LiteLLM provider/model 模型目錄",
+        "",
+        (
+            f"本文件是 {len(catalog['providers'])} 個 providers、{len(entries)} 組"
+            " provider/model 設定的可讀版快照。模型清單會變動，請依各 provider 官方文件"
+            " 與來源端點重新查核。"
+        ),
+        "",
+        "## 來源",
+        "",
+        (
+            f"- BYOK Forge：[{source['repository']} 的 `litellm.html`]"
+            f"({source['page']})，commit `{source['commit']}`。"
+        ),
+    ]
+    for provider in catalog["providers"]:
+        provider_source = provider.get("source")
+        if provider_source:
+            lines.append(
+                f"- {provider['name']}：官方模型 API [來源端點]({provider_source['url']})，"
+                f"擷取日期 `{provider_source.get('retrieved_at', 'unknown')}`。"
+            )
+
+    for provider in catalog["providers"]:
+        provider_entries = [model for current, model in entries if current is provider]
+        lines.extend(
+            [
+                "",
+                f"## {provider['name']}",
+                "",
+                f"- LiteLLM prefix：`{provider['prefix']}`",
+                f"- 模型數：{len(provider_entries)}",
+                "",
+                "| 模型 | model alias | API base |",
+                "| --- | --- | --- |",
+            ]
+        )
+        base = provider.get("base_default", "provider 預設端點")
+        for model in provider_entries:
+            lines.append(
+                f"| `{model}` | `{model_alias(provider, model)}` | `{base}` |"
+            )
+
+    return "\n".join(lines) + "\n"
+
+
+def ollama_cloud_catalog_text(catalog: dict[str, Any]) -> str:
+    """Render direct API names and local signed-in cloud variants."""
+
+    providers = [
+        item
+        for item in catalog["providers"]
+        if item.get("id") in {"ollama_cloud", "ollama_cloud_local"}
+    ]
+    if not providers:
+        raise ValueError("catalog.json 缺少 Ollama Cloud provider")
+
+    total = sum(len(provider["models"]) for provider in providers)
+    lines = [
+        "# Ollama Cloud 模型清單",
+        "",
+        (
+            f"本文件列出 {len(providers)} 種 Ollama Cloud 存取方式、{total} 個模型名稱；"
+            "直接 API 名稱與本機登入後的 `:cloud` 變體不能互換。"
+        ),
+        "",
+    ]
+    for provider in providers:
+        source = provider["source"]
+        lines.extend(
+            [
+                "",
+                f"## {provider['name']}",
+                "",
+                f"- 查核日期：`{source['retrieved_at']}`",
+                f"- API base：`{provider['base_default']}`",
+                f"- LiteLLM prefix：`{provider['prefix']}`",
+                (
+                    "- API key 環境變數：`OLLAMA_API_KEY`"
+                    if not provider.get("keyless")
+                    else "- 驗證：本機 Ollama 需先執行 `ollama signin`"
+                ),
+                f"- 來源：[Ollama Cloud 官方來源]({source['url']})",
+                f"- 官方說明：[Ollama Cloud 官方文件]({source['docs']})",
+                "",
+                "| 模型 | LiteLLM model route | model alias |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for model in provider["models"]:
+            lines.append(
+                f"| `{model}` | `{provider['prefix']}/{model}` | "
+                f"`{model_alias(provider, model)}` |"
+            )
+        lines.extend(
+            [
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "> Ollama Cloud 模型會隨官方 API 與模型庫變更；重新產生前請再次查核模型可用性、"
+            "帳戶方案與區域限制。這份檔案不是 Ollama 公開 model library 的永久快照。",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description="產生 LiteLLM provider/model 範例")
+    parser.add_argument(
+        "--refresh-ollama-cloud",
+        action="store_true",
+        help="先從 Ollama Cloud 官方 /api/tags 重新擷取模型清單",
+    )
+    args = parser.parse_args()
+
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    if args.refresh_ollama_cloud:
+        count = refresh_ollama_cloud_catalog(catalog)
+        CATALOG_PATH.write_text(
+            json.dumps(catalog, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"已從 Ollama Cloud 官方 API 更新 {count} 個模型")
+
     providers = catalog["providers"]
     entries = [(provider, model) for provider in providers for model in provider["models"]]
 
@@ -143,10 +337,18 @@ def main() -> int:
         )
 
     (EXAMPLES / "all-models.yaml").write_text(
-        config_text(catalog, entries, title="All BYOK Forge LiteLLM provider/model combinations"),
+        config_text(catalog, entries, title="All LiteLLM provider/model combinations"),
         encoding="utf-8",
     )
     (EXAMPLES / ".env.example").write_text(env_example(catalog), encoding="utf-8")
+    (EXAMPLES / "model-catalog.md").write_text(
+        model_catalog_text(catalog, entries),
+        encoding="utf-8",
+    )
+    (EXAMPLES / "ollama-cloud-models.md").write_text(
+        ollama_cloud_catalog_text(catalog),
+        encoding="utf-8",
+    )
 
     print(f"已產生 {len(providers)} 個 providers、{len(entries)} 個 provider/model 範例")
     return 0

@@ -1,6 +1,6 @@
 ---
 name: litellm-guardrails-safety
-description: 設定或審查 LiteLLM 內容安全、PII masking、prompt injection、tool permission、MCP guardrails 與 call hooks。當任務需要修改、拒絕或限制 LLM／tool／MCP 請求時使用；MCP server 註冊與一般 virtual-key 預算改用對應專門技能。
+description: 設定或審查 LiteLLM 內容安全、PII masking、prompt injection、tool permission、MCP guardrails、call hooks 與機密衛生。當任務需要修改、拒絕或限制 LLM／tool／MCP 請求，或盤點、清理意外暴露的 credential 與敏感產物時使用；MCP server 註冊與一般 virtual-key 預算改用對應專門技能。
 ---
 
 # LiteLLM Guardrails Safety
@@ -15,7 +15,7 @@ description: 設定或審查 LiteLLM 內容安全、PII masking、prompt injecti
 6. 明確定義 provider error 與 guardrail error 的 fail-open 或 fail-closed 行為。
 7. 測試 allow、deny、mask、rewrite、provider error 與 guardrail error。
 
-需要 tool permission config、PII config 與測試規格時，讀取 [實驗與參考](references/guide.md)。
+需要 tool permission config、PII config 與測試規格時，讀取 [實驗與參考](references/guide.md)；涉及 custom hook、請求改寫或維運資料清理時，讀取 [Custom hook 與機密衛生](references/custom-hooks-and-secret-hygiene.md)。
 
 ## 安全底線
 

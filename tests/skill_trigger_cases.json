@@ -8,5 +8,9 @@
   {"prompt": "註冊 MCP server 並限制 agent 可見工具", "expected_skills": ["litellm-mcp-skills-gateway"], "excluded_skills": ["litellm-sdk-basics"]},
   {"prompt": "建立有預算與 trace 的 LiteLLM Proxy", "expected_skills": ["litellm-proxy-gateway", "litellm-cost-governance", "litellm-observability"]},
   {"prompt": "替 MCP tool 加上參數 guardrail", "expected_skills": ["litellm-mcp-skills-gateway", "litellm-guardrails-safety"]},
-  {"prompt": "比較兩個模型的 fallback 成本", "expected_skills": ["litellm-routing-reliability", "litellm-cost-governance"]}
+  {"prompt": "比較兩個模型的 fallback 成本", "expected_skills": ["litellm-routing-reliability", "litellm-cost-governance"]},
+  {"prompt": "把 LiteLLM Postgres 備份還原到暫時容器驗證", "expected_skills": ["litellm-operations-runbook"], "excluded_skills": ["litellm-proxy-gateway"]},
+  {"prompt": "封存上個月的 SpendLogs 並保留 checksum", "expected_skills": ["litellm-operations-runbook", "litellm-observability"]},
+  {"prompt": "安全輪替 live proxy virtual key 並保留完整政策", "expected_skills": ["litellm-cost-governance", "litellm-mcp-skills-gateway"], "excluded_skills": ["litellm-operations-runbook"]},
+  {"prompt": "盤點 LiteLLM 維運 repo 中疑似外洩的 secret 並規劃輪替清理", "expected_skills": ["litellm-guardrails-safety"], "excluded_skills": ["litellm-operations-runbook"]}
 ]

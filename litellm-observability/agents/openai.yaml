@@ -1,0 +1,4 @@
+interface:
+  display_name: "LiteLLM Observability"
+  short_description: "Trace LiteLLM usage safely"
+  default_prompt: "Use $litellm-observability to design LiteLLM logging, spend tracking, and privacy-safe dashboards."

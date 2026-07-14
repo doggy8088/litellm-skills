@@ -18,7 +18,38 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python scripts/validate_skills.py
+      - name: Validate skill structure and repository hygiene
+        run: python scripts/validate_skills.py
+      - name: Run Python safety tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Validate shell scripts
+        run: |
+          find . -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+          find . -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=warning
       - name: Check external links
         if: github.event_name == 'schedule'
         run: python scripts/check_links.py
+
+  postgres-roundtrip:
+    name: PostgreSQL backup and SpendLogs round-trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LITELLM_INTEGRATION_DIR: ${{ runner.temp }}/litellm-skills-integration
+      COMPOSE_PROJECT_NAME: litellm-skills-integration-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install age
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes age
+      - name: Run PostgreSQL 16 round-trip
+        run: bash tests/integration/postgres-roundtrip.sh
+      - name: Clean up integration containers and volumes
+        if: always()
+        run: |
+          if [[ -f tests/integration/postgres-roundtrip.sh ]]; then
+            bash tests/integration/postgres-roundtrip.sh cleanup
+          fi

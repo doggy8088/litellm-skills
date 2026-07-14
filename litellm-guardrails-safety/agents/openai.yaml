@@ -1,0 +1,4 @@
+interface:
+  display_name: "LiteLLM Guardrails Safety"
+  short_description: "Build LiteLLM safety and secret hygiene controls"
+  default_prompt: "Use $litellm-guardrails-safety to design LiteLLM guardrails, hooks, secret hygiene, and bypass tests."

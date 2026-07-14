@@ -109,6 +109,71 @@ class GeneratorUnitTests(unittest.TestCase):
         self.assertTrue(any("多餘生成檔" in error for error in errors))
         self.assertTrue(any("生成內容不同步" in error for error in errors))
 
+    def test_atomic_writer_replaces_outputs_and_removes_stale_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            examples = Path(directory)
+            stale_file = examples / "providers" / "old" / "stale.yaml"
+            stale_file.parent.mkdir(parents=True)
+            stale_file.write_text("stale", encoding="utf-8")
+            (examples / "all-models.yaml").write_text("old", encoding="utf-8")
+            outputs = {
+                Path("providers/new/model.yaml"): "model",
+                Path("all-models.yaml"): "new",
+            }
+
+            self.generator.write_outputs_atomically(outputs, examples=examples)
+
+            self.assertEqual(
+                (examples / "providers" / "new" / "model.yaml").read_text(
+                    encoding="utf-8"
+                ),
+                "model",
+            )
+            self.assertEqual(
+                (examples / "all-models.yaml").read_text(encoding="utf-8"),
+                "new",
+            )
+            self.assertFalse(stale_file.exists())
+            self.assertFalse(stale_file.parent.exists())
+
+    def test_atomic_writer_rolls_back_every_output_after_replace_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            examples = Path(directory)
+            env_file = examples / ".env.example"
+            all_models_file = examples / "all-models.yaml"
+            env_file.write_text("old-env", encoding="utf-8")
+            all_models_file.write_text("old-models", encoding="utf-8")
+            outputs = {
+                Path(".env.example"): "new-env",
+                Path("all-models.yaml"): "new-models",
+            }
+            real_replace = self.generator.os.replace
+            replacement_count = 0
+
+            def fail_second_replace(source, target):
+                nonlocal replacement_count
+                replacement_count += 1
+                if replacement_count == 2:
+                    raise OSError("simulated replace failure")
+                return real_replace(source, target)
+
+            with mock.patch.object(
+                self.generator.os,
+                "replace",
+                side_effect=fail_second_replace,
+            ):
+                with self.assertRaises(OSError):
+                    self.generator.write_outputs_atomically(
+                        outputs,
+                        examples=examples,
+                    )
+
+            self.assertEqual(env_file.read_text(encoding="utf-8"), "old-env")
+            self.assertEqual(
+                all_models_file.read_text(encoding="utf-8"),
+                "old-models",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

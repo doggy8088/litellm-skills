@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shutil
+import tempfile
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -350,18 +353,121 @@ def check_outputs(outputs: dict[Path, str]) -> list[str]:
     return errors
 
 
-def write_outputs(outputs: dict[Path, str]) -> None:
-    """Write rendered outputs using the legacy direct-update behavior."""
+def _safe_target(root: Path, relative_path: Path) -> Path:
+    """Resolve a generated path and reject paths outside its intended root."""
 
-    provider_root = EXAMPLES / "providers"
-    provider_root.mkdir(parents=True, exist_ok=True)
-    for old_file in provider_root.glob("*/*.yaml"):
-        old_file.unlink()
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise ValueError(f"生成檔路徑必須位於目標目錄內：{relative_path}")
+    target = root / relative_path
+    try:
+        target.resolve(strict=False).relative_to(root.resolve())
+    except ValueError as error:
+        raise ValueError(f"生成檔路徑超出目標目錄：{relative_path}") from error
+    return target
 
-    for relative_path, content in outputs.items():
-        target = EXAMPLES / relative_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+
+def _remove_empty_directories(directories: set[Path]) -> None:
+    """Remove directories created by or made obsolete by a generation run."""
+
+    for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+        try:
+            directory.rmdir()
+        except (FileNotFoundError, OSError):
+            pass
+
+
+def write_outputs_atomically(
+    outputs: dict[Path, str],
+    *,
+    examples: Path = EXAMPLES,
+    catalog_text: str | None = None,
+) -> None:
+    """Stage all outputs, then replace them with rollback on failure."""
+
+    payloads = dict(outputs)
+    if catalog_text is not None:
+        payloads[Path("catalog.json")] = catalog_text
+
+    expected_provider_files = {
+        path for path in outputs if path.parts and path.parts[0] == "providers"
+    }
+    provider_root = examples / "providers"
+    actual_provider_files = {
+        path.relative_to(examples) for path in provider_root.glob("*/*.yaml")
+    }
+    stale_provider_files = actual_provider_files - expected_provider_files
+    touched_paths = set(payloads) | stale_provider_files
+
+    for relative_path in touched_paths:
+        target = _safe_target(examples, relative_path)
+        if target.is_symlink():
+            raise ValueError(f"生成檔目標不得為符號連結：{relative_path}")
+
+    with tempfile.TemporaryDirectory(
+        prefix=".byok-forge-",
+        dir=examples.parent,
+    ) as temporary_directory:
+        temporary_root = Path(temporary_directory)
+        staged_root = temporary_root / "staged"
+        backup_root = temporary_root / "backup"
+
+        # Finish every render-to-disk operation before changing the target tree.
+        for relative_path, content in sorted(
+            payloads.items(), key=lambda item: str(item[0])
+        ):
+            staged_target = _safe_target(staged_root, relative_path)
+            staged_target.parent.mkdir(parents=True, exist_ok=True)
+            staged_target.write_text(content, encoding="utf-8")
+
+        existing_paths: set[Path] = set()
+        for relative_path in sorted(touched_paths, key=str):
+            target = _safe_target(examples, relative_path)
+            if target.exists():
+                backup_target = _safe_target(backup_root, relative_path)
+                backup_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target, backup_target)
+                existing_paths.add(relative_path)
+
+        created_directories: set[Path] = set()
+        try:
+            for relative_path in sorted(stale_provider_files, key=str):
+                _safe_target(examples, relative_path).unlink()
+
+            for relative_path in sorted(payloads, key=str):
+                target = _safe_target(examples, relative_path)
+                missing_parents = []
+                parent = target.parent
+                while parent != examples and not parent.exists():
+                    missing_parents.append(parent)
+                    parent = parent.parent
+                target.parent.mkdir(parents=True, exist_ok=True)
+                created_directories.update(missing_parents)
+                os.replace(_safe_target(staged_root, relative_path), target)
+        except Exception as error:
+            rollback_errors: list[str] = []
+            for relative_path in sorted(touched_paths, key=str):
+                target = _safe_target(examples, relative_path)
+                try:
+                    if relative_path in existing_paths:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(
+                            _safe_target(backup_root, relative_path),
+                            target,
+                        )
+                    else:
+                        target.unlink(missing_ok=True)
+                except OSError as rollback_error:
+                    rollback_errors.append(f"{relative_path}: {rollback_error}")
+            _remove_empty_directories(created_directories)
+            if rollback_errors:
+                details = "; ".join(rollback_errors)
+                raise RuntimeError(f"生成失敗且無法完整回復：{details}") from error
+            raise
+
+        obsolete_directories = {
+            _safe_target(examples, path).parent for path in stale_provider_files
+        }
+        _remove_empty_directories(obsolete_directories)
 
 
 def main() -> int:
@@ -380,13 +486,9 @@ def main() -> int:
     args = parser.parse_args()
 
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    refreshed_model_count: int | None = None
     if args.refresh_ollama_cloud:
-        count = refresh_ollama_cloud_catalog(catalog)
-        CATALOG_PATH.write_text(
-            json.dumps(catalog, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        print(f"已從 Ollama Cloud 官方 API 更新 {count} 個模型")
+        refreshed_model_count = refresh_ollama_cloud_catalog(catalog)
 
     outputs = render_outputs(catalog)
     if args.check:
@@ -398,7 +500,14 @@ def main() -> int:
         print(f"生成物檢查通過：{len(outputs)} 份檔案")
         return 0
 
-    write_outputs(outputs)
+    catalog_text = (
+        json.dumps(catalog, ensure_ascii=False, indent=2) + "\n"
+        if refreshed_model_count is not None
+        else None
+    )
+    write_outputs_atomically(outputs, catalog_text=catalog_text)
+    if refreshed_model_count is not None:
+        print(f"已從 Ollama Cloud 官方 API 更新 {refreshed_model_count} 個模型")
     model_count = sum(len(provider["models"]) for provider in catalog["providers"])
     print(
         f"已產生 {len(catalog['providers'])} 個 providers、"

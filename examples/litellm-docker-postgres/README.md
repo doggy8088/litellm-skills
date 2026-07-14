@@ -4,7 +4,7 @@
 
 ```sh
 cp .env.example .env
-docker compose config
+docker compose config --quiet
 docker compose up -d
 docker compose ps
 for attempt in $(seq 1 30); do

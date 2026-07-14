@@ -128,10 +128,19 @@ random_hex() {
 }
 
 validate_date() {
-  local value="$1" normalized
+  local value="$1"
   [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
-  normalized="$(date -u -d "$value" +%F 2>/dev/null)" || return 1
-  [[ "$normalized" == "$value" ]]
+  python3 - "$value" <<'PY'
+import sys
+from datetime import datetime
+
+try:
+    parsed = datetime.strptime(sys.argv[1], "%Y-%m-%d")
+except ValueError:
+    raise SystemExit(1)
+
+raise SystemExit(0 if parsed.strftime("%Y-%m-%d") == sys.argv[1] else 1)
+PY
 }
 
 supported_path() {
@@ -398,6 +407,7 @@ if [[ -z "$SOURCE" ]]; then
   fi
 fi
 [[ "$SOURCE" == local || "$SOURCE" == azure ]] || die "--source must be local or azure"
+command -v python3 >/dev/null 2>&1 || die "python3 is required"
 
 if [[ -n "$TARGET_DATE" ]]; then
   validate_date "$TARGET_DATE" || die "invalid --date"
@@ -419,7 +429,6 @@ fi
 command -v docker >/dev/null 2>&1 || die "docker is required"
 command -v date >/dev/null 2>&1 || die "date is required"
 command -v age >/dev/null 2>&1 || die "age is required"
-command -v python3 >/dev/null 2>&1 || die "python3 is required"
 [[ -f "$ZIP_PREPARER" ]] || die "logical ZIP preparer not found: $ZIP_PREPARER"
 [[ -n "$AGE_IDENTITY" ]] || die "set LITELLM_AGE_IDENTITY_FILE or pass --age-identity"
 [[ -f "$AGE_IDENTITY" && -r "$AGE_IDENTITY" ]] || die "age identity file is not readable"

@@ -172,6 +172,28 @@ ensure_prereqs() {
   [[ -f "$PROJECT_DIR/docker-compose.yml" || -f "$PROJECT_DIR/compose.yml" || -f "$PROJECT_DIR/compose.yaml" ]] || die "compose file not found in $PROJECT_DIR."
 }
 
+next_month_start() {
+  python3 - "$1" <<'PY'
+import sys
+
+try:
+    year_text, month_text, day_text = sys.argv[1].split("-")
+    year, month, day = int(year_text), int(month_text), int(day_text)
+    if day != 1 or not 1 <= year <= 9999 or not 1 <= month <= 12:
+        raise ValueError
+    if month == 12:
+        if year == 9999:
+            raise ValueError
+        year, month = year + 1, 1
+    else:
+        month += 1
+except ValueError:
+    raise SystemExit(1)
+
+sys.stdout.write(f"{year:04d}-{month:02d}-01")
+PY
+}
+
 columns_sql() {
   local prefix="${1:-}"
   local joined="" col item
@@ -347,7 +369,7 @@ PG_CID="$(postgres_container_id)"
 [[ -n "$PG_CID" ]] || die "postgres container is not running."
 
 START_DATE="${MONTH}-01"
-END_DATE="$(date -u -d "${START_DATE} +1 month" +%Y-%m-%d)"
+END_DATE="$(next_month_start "$START_DATE")" || die "Could not calculate the next month."
 START_TS="${START_DATE} 00:00:00"
 END_TS="${END_DATE} 00:00:00"
 ARCHIVE_TS="$(date -u +%Y%m%dT%H%M%SZ)"

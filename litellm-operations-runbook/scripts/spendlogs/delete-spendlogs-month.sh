@@ -111,14 +111,36 @@ postgres_container_id() {
 
 ensure_prereqs() {
   have docker || die "docker command not found."
+  have python3 || die "python3 command not found."
   docker info >/dev/null 2>&1 || die "Docker is not running."
   [[ -f "$PROJECT_DIR/docker-compose.yml" || -f "$PROJECT_DIR/compose.yml" || -f "$PROJECT_DIR/compose.yaml" ]] || die "compose file not found in $PROJECT_DIR."
   if [[ -n "$ARCHIVE_FILE" ]]; then
-    have python3 || die "python3 command not found."
     have age || die "age command not found."
     have sha256sum || die "sha256sum command not found."
     [[ -f "$ARCHIVE_VALIDATOR" ]] || die "archive validator not found: $ARCHIVE_VALIDATOR"
   fi
+}
+
+next_month_start() {
+  python3 - "$1" <<'PY'
+import sys
+
+try:
+    year_text, month_text, day_text = sys.argv[1].split("-")
+    year, month, day = int(year_text), int(month_text), int(day_text)
+    if day != 1 or not 1 <= year <= 9999 or not 1 <= month <= 12:
+        raise ValueError
+    if month == 12:
+        if year == 9999:
+            raise ValueError
+        year, month = year + 1, 1
+    else:
+        month += 1
+except ValueError:
+    raise SystemExit(1)
+
+sys.stdout.write(f"{year:04d}-{month:02d}-01")
+PY
 }
 
 verify_ciphertext_checksum() {
@@ -425,7 +447,7 @@ PG_CID="$(postgres_container_id)"
 [[ -n "$PG_CID" ]] || die "postgres container is not running."
 
 START_DATE="${MONTH}-01"
-END_DATE="$(date -u -d "${START_DATE} +1 month" +%Y-%m-%d)"
+END_DATE="$(next_month_start "$START_DATE")" || die "Could not calculate the next month."
 START_TS="${START_DATE} 00:00:00"
 END_TS="${END_DATE} 00:00:00"
 

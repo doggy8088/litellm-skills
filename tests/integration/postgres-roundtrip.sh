@@ -47,9 +47,22 @@ cleanup() {
   return "$status"
 }
 
-have realpath || die "required command not found: realpath"
-TEMP_ROOT="$(realpath -m -- "$TEMP_ROOT")"
-WORK_DIR="$(realpath -m -- "$WORK_DIR")"
+canonical_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+raw = sys.argv[1]
+resolved = os.path.realpath(raw)
+if "\n" in raw or "\r" in raw or "\n" in resolved or "\r" in resolved:
+    raise SystemExit(1)
+sys.stdout.write(resolved)
+PY
+}
+
+have python3 || die "required command not found: python3"
+TEMP_ROOT="$(canonical_path "$TEMP_ROOT")" || die "could not canonicalize the temporary root"
+WORK_DIR="$(canonical_path "$WORK_DIR")" || die "could not canonicalize the integration work directory"
 [[ "$TEMP_ROOT" != "/" ]] || die "temporary root must not be the filesystem root"
 case "$WORK_DIR" in
   "$TEMP_ROOT"/*) ;;
@@ -73,7 +86,7 @@ trap 'cleanup "$?"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-for command in age age-keygen docker python3 sha256sum tar zip; do
+for command in age age-keygen docker sha256sum tar zip; do
   have "$command" || die "required command not found: $command"
 done
 docker compose version >/dev/null

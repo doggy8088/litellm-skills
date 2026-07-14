@@ -150,6 +150,21 @@ sas_has_permission() {
   return 1
 }
 
+retention_cutoff_utc() {
+  python3 - "$1" <<'PY'
+import sys
+from datetime import datetime, timedelta, timezone
+
+try:
+    days = int(sys.argv[1])
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+except (OverflowError, ValueError):
+    raise SystemExit(1)
+
+sys.stdout.write(cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"))
+PY
+}
+
 if [[ -n "$DELETE_OLDER_THAN_DAYS" ]]; then
   [[ -z "$FILE_PATH" ]] || die "upload and retention must be separate invocations"
   [[ "$DELETE_OLDER_THAN_DAYS" =~ ^[1-9][0-9]*$ ]] || \
@@ -157,9 +172,9 @@ if [[ -n "$DELETE_OLDER_THAN_DAYS" ]]; then
   [[ "$EXECUTE_RETENTION" == true ]] || \
     die "retention deletion requires --execute-retention"
   sas_has_permission d || die "the SAS requires delete permission for retention"
-  command -v date >/dev/null 2>&1 || die "date is required"
+  command -v python3 >/dev/null 2>&1 || die "python3 is required"
 
-  CUTOFF_UTC="$(date -u -d "${DELETE_OLDER_THAN_DAYS} days ago" +'%Y-%m-%dT%H:%M:%SZ')" || \
+  CUTOFF_UTC="$(retention_cutoff_utc "$DELETE_OLDER_THAN_DAYS")" || \
     die "could not calculate the retention cutoff"
   log "Deleting encrypted backup archives older than ${DELETE_OLDER_THAN_DAYS} days"
   if ! run_azcopy remove "$SAS_URL" \

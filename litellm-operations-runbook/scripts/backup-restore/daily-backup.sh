@@ -152,7 +152,7 @@ log "Creating a logical dump of database ${PG_DB}"
 ERROR_FILE="${WORK_DIR}/pg_dump.err"
 if ! compose exec -T postgres pg_dump -U "$PG_USER" -d "$PG_DB" -Fc \
   >"$DUMP_FILE" 2>"$ERROR_FILE"; then
-  sed -E 's/(password|secret|token|sig)=[^[:space:]]+/\1=<redacted>/Ig' "$ERROR_FILE" >&2 || true
+  sed -E 's/([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Ss][Ii][Gg])=[^[:space:]]+/\1=<redacted>/g' "$ERROR_FILE" >&2 || true
   die "database dump failed"
 fi
 [[ -s "$DUMP_FILE" ]] || die "database dump is empty"

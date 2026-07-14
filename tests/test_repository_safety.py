@@ -61,13 +61,22 @@ class RepositorySafetyTests(unittest.TestCase):
             "SAS signature": re.compile(r"(?i)[?&]sig=[A-Za-z0-9%/+_-]{16,}"),
             "Azure account key": re.compile(r"(?i)AccountKey=[A-Za-z0-9+/=]{20,}"),
         }
+        documented_placeholders = {
+            "sk-local-change-this-value",
+            "sk-provider-key-goes-here",
+        }
         text_suffixes = {".json", ".md", ".ps1", ".py", ".sh", ".txt", ".yaml", ".yml"}
         for path in git_visible_files():
             if path.suffix.lower() not in text_suffixes and path.name not in {".env.example", ".gitignore"}:
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             for label, pattern in patterns.items():
-                self.assertIsNone(pattern.search(text), f"{path} 含疑似 {label}")
+                findings = {
+                    match.group(0)
+                    for match in pattern.finditer(text)
+                    if match.group(0) not in documented_placeholders
+                }
+                self.assertFalse(findings, f"{path} 含疑似 {label}: {sorted(findings)}")
 
     def test_backup_archive_does_not_include_dotenv(self) -> None:
         script = (BACKUP / "daily-backup.sh").read_text(encoding="utf-8")
@@ -130,6 +139,33 @@ class RepositorySafetyTests(unittest.TestCase):
             end_time_index = columns.index("endTime")
             self.assertEqual(columns[end_time_index + 1], "request_duration_ms")
             self.assertEqual(columns[end_time_index + 2], "completionStartTime")
+
+    def test_shell_scripts_avoid_reviewed_gnu_only_options(self) -> None:
+        for path in ROOT.rglob("*.sh"):
+            script = path.read_text(encoding="utf-8")
+            self.assertIsNone(
+                re.search(r"\bdate[^\n]*\s-d(?:\s|$)", script),
+                f"{path} 不得使用 GNU date -d",
+            )
+            self.assertNotIn("realpath -m", script, f"{path} 不得使用 GNU realpath -m")
+            self.assertIsNone(
+                re.search(r"\bsed\b[^\n]*/[A-Za-z]*I[A-Za-z]*['\"]", script),
+                f"{path} 不得使用 GNU sed I modifier",
+            )
+
+        daily_backup = (BACKUP / "daily-backup.sh").read_text(encoding="utf-8")
+        redaction = re.search(
+            r"sed -E 's/(?P<pattern>.+?)/\\1=<redacted>/g'",
+            daily_backup,
+        )
+        self.assertIsNotNone(redaction, "找不到可攜式錯誤訊息遮蔽規則")
+        python_pattern = redaction.group("pattern").replace("[^[:space:]]+", r"\S+")
+        redact = re.compile(python_pattern)
+        for secret_name in ("password", "PASSWORD", "Password", "ToKeN"):
+            self.assertEqual(
+                redact.sub(r"\1=<redacted>", f"error {secret_name}=sensitive"),
+                f"error {secret_name}=<redacted>",
+            )
 
     def test_custom_hook_cannot_rewrite_model_or_register_pricing(self) -> None:
         path = (

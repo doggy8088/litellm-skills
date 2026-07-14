@@ -74,39 +74,36 @@ https://litellm.example.com
 
 ## 4. 安全安裝
 
-### 4.1 官方快速安裝方式
+### 4.1 固定並審查來源
 
-使用 Skills CLI 將官方 repo 的全部 skills 安裝到 Codex：
+先取得本文件查核過的 commit，確認目前目錄只包含該版本，再從本機來源安裝：
 
 ```sh
-npx skills add BerriAI/litellm-skills --skill '*' --agent codex -y
+git clone https://github.com/BerriAI/litellm-skills.git litellm-skills-reviewed
+cd litellm-skills-reviewed
+git checkout --detach b13e7fc1bf2c3149625bcf5964fee2881fd3d027
+test "$(git rev-parse HEAD)" = "b13e7fc1bf2c3149625bcf5964fee2881fd3d027"
+find . -name SKILL.md -print | sort
 ```
 
-命令參數如下：
+逐一審查 `SKILL.md`、可執行腳本、allowed tools 與管理 API 後，使用固定版本的 Skills CLI 安裝本機目錄：
 
-- `BerriAI/litellm-skills`：官方 GitHub repo。
-- `--skill '*'`：安裝 repo 中的全部 skills。
-- `--agent codex`：指定安裝目標為 Codex。
-- `-y`：略過互動式確認。
+```sh
+npx --yes skills@1.5.17 add . --skill '*' --agent codex -y
+```
+
+`skills@1.5.17` 是本文件於 2026-07-15 查核的固定版本；升級 CLI 時必須重新檢視 release 與安裝行為。`--skill '*'` 安裝已審查目錄中的全部 skills，`--agent codex` 指定目標，`-y` 只略過已固定本機來源的確認。
 
 安裝完成後，重新載入 Codex 的 skills，並確認官方 skill 已可被發現。
 
-### 4.2 可審查的替代方式
+### 4.2 不可重現的快速方式
 
-`npx skills add` 會依 repo 目前狀態安裝。正式環境若需要可重現版本，先固定 commit 並審查內容：
+直接把 `BerriAI/litellm-skills` 傳給 Skills CLI 會依 repo 當下狀態安裝，不能證明內容等同本文件的固定版本。具備 Proxy admin key 的環境不得使用可變分支或未固定的 CLI 套件；拋棄式隔離環境若要評估上游最新版，也必須先列出內容並完成人工審查。
 
-```sh
-git clone https://github.com/BerriAI/litellm-skills.git
-cd litellm-skills
-git checkout b13e7fc1bf2c3149625bcf5964fee2881fd3d027
-git verify-commit b13e7fc1bf2c3149625bcf5964fee2881fd3d027 || true
-sed -n '1,240p' install.sh
-```
-
-`git verify-commit` 只有在該 commit 具有可驗證簽章時才會成功；失敗不等於內容必然有問題，但表示不能以簽章確認來源。完成審查後，先確認 Skills CLI 是否支援從 local source 或指定 commit 安裝：
+需要檢查目前 CLI 支援的來源與參數時，使用同一固定版本：
 
 ```sh
-npx skills add --help
+npx --yes skills@1.5.17 add --help
 ```
 
 不要再混用舊的 `install.sh` 符號連結流程。
@@ -524,31 +521,25 @@ curl -s "$BASE/tag/daily/activity?tags=job:nightly-eval&start_date=2026-07-01&en
 
 ### 18.1 Skills CLI 的升級行為
 
-再次執行安裝命令時，Skills CLI 會依目前 repo 狀態重新解析並更新指定 agent 的 skills：
-
-```sh
-npx skills add BerriAI/litellm-skills --skill '*' --agent codex -y
-```
-
-這個命令追蹤 repo 的目前狀態，不會自動固定先前使用的 commit。
+再次安裝時仍必須從已審查的本機 checkout 執行；不要改回追蹤 repo 目前狀態的遠端 shorthand。
 
 ### 18.2 建議升級流程
 
 ```sh
-npx skills add --help
 git clone https://github.com/BerriAI/litellm-skills.git /tmp/litellm-skills-review
 git -C /tmp/litellm-skills-review log --oneline -5
 find /tmp/litellm-skills-review -name SKILL.md -print | sort
+npx --yes skills@1.5.17 add --help
 ```
 
-審查 API endpoint、欄位、allowed tools 與 `SKILL.md` 後，再依 Skills CLI 的目前說明安裝。若需要嚴格固定 commit，必須先確認目前 CLI 支援的 local source 或 commit 參數，不應假設 repo 的可變分支具備可重現性。
+選定並 checkout 新的完整 commit SHA，審查 API endpoint、欄位、allowed tools 與 `SKILL.md` 後，才從該本機目錄安裝。更新 Skills CLI 版本時也要獨立審查；不可假設 repo 的可變分支或 npm 的 `latest` 標籤具備可重現性。
 
 ### 18.3 卸載
 
 Skills CLI 管理安裝目錄；卸載前先查看目前 CLI 支援的命令：
 
 ```sh
-npx skills --help
+npx --yes skills@1.5.17 --help
 ```
 
 不要以廣泛 wildcard 刪除任何 skills 目錄，該目錄可能包含其他使用者 skills。

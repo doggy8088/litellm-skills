@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
@@ -21,6 +22,27 @@ EXAMPLES = ROOT / "examples" / "litellm-byok-forge"
 CATALOG_PATH = EXAMPLES / "catalog.json"
 OLLAMA_CLOUD_TAGS_URL = "https://ollama.com/api/tags"
 OLLAMA_CLOUD_DOCS_URL = "https://docs.ollama.com/cloud"
+MODEL_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}")
+
+
+def validate_model_name(value: object) -> str:
+    """Validate a model name before using it in paths, YAML, or Markdown."""
+
+    if not isinstance(value, str):
+        raise ValueError("模型名稱必須是字串")
+    if MODEL_NAME_PATTERN.fullmatch(value) is None:
+        raise ValueError("模型名稱包含不允許的字元或長度超過 200 字元")
+    return value
+
+
+def markdown_table_code(value: str) -> str:
+    """Render a value as code without allowing Markdown table injection."""
+
+    normalized = value.replace("\r", " ").replace("\n", " ")
+    if any(character in normalized for character in "`|<>&"):
+        escaped = html.escape(normalized, quote=False).replace("|", "&#124;")
+        return f"<code>{escaped}</code>"
+    return f"`{normalized}`"
 
 
 def slug(value: str) -> str:
@@ -78,24 +100,29 @@ def refresh_ollama_cloud_catalog(catalog: dict[str, Any]) -> int:
     with urllib.request.urlopen(request, timeout=30) as response:
         payload = json.load(response)
 
-    names = sorted(
-        {
-            str(item.get("name") or item.get("model"))
-            for item in payload.get("models", [])
-            if isinstance(item, dict) and (item.get("name") or item.get("model"))
-        }
-    )
-    if not names:
+    if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+        raise ValueError("Ollama Cloud API 回應缺少 models 陣列")
+
+    names: set[str] = set()
+    for item in payload["models"]:
+        if not isinstance(item, dict):
+            raise ValueError("Ollama Cloud API 的模型項目必須是物件")
+        raw_name = item.get("name")
+        if raw_name is None:
+            raw_name = item.get("model")
+        names.add(validate_model_name(raw_name))
+    sorted_names = sorted(names)
+    if not sorted_names:
         raise ValueError("Ollama Cloud API 未回傳任何模型")
 
-    provider["models"] = names
+    provider["models"] = sorted_names
     provider["source"] = {
         "type": "ollama-api-tags",
         "url": OLLAMA_CLOUD_TAGS_URL,
         "docs": OLLAMA_CLOUD_DOCS_URL,
         "retrieved_at": datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat(),
     }
-    return len(names)
+    return len(sorted_names)
 
 
 def config_text(
@@ -222,7 +249,9 @@ def model_catalog_text(
         base = provider.get("base_default", "provider 預設端點")
         for model in provider_entries:
             lines.append(
-                f"| `{model}` | `{model_alias(provider, model)}` | `{base}` |"
+                f"| {markdown_table_code(model)} | "
+                f"{markdown_table_code(model_alias(provider, model))} | "
+                f"{markdown_table_code(base)} |"
             )
 
     return "\n".join(lines) + "\n"
@@ -272,9 +301,10 @@ def ollama_cloud_catalog_text(catalog: dict[str, Any]) -> str:
             ]
         )
         for model in provider["models"]:
+            route = f"{provider['prefix']}/{model}"
             lines.append(
-                f"| `{model}` | `{provider['prefix']}/{model}` | "
-                f"`{model_alias(provider, model)}` |"
+                f"| {markdown_table_code(model)} | {markdown_table_code(route)} | "
+                f"{markdown_table_code(model_alias(provider, model))} |"
             )
         lines.extend(
             [
@@ -296,7 +326,17 @@ def render_outputs(catalog: dict[str, Any]) -> dict[Path, str]:
     """Render every generated artifact without touching the working tree."""
 
     providers = catalog["providers"]
-    entries = [(provider, model) for provider in providers for model in provider["models"]]
+    if not isinstance(providers, list):
+        raise ValueError("catalog.json 的 providers 必須是陣列")
+
+    entries: list[tuple[dict[str, Any], str]] = []
+    for provider in providers:
+        if not isinstance(provider, dict):
+            raise ValueError("catalog.json 的 provider 項目必須是物件")
+        models = provider.get("models")
+        if not isinstance(models, list):
+            raise ValueError("catalog.json 的 models 必須是陣列")
+        entries.extend((provider, validate_model_name(model)) for model in models)
 
     aliases = [model_alias(provider, model) for provider, model in entries]
     if len(aliases) != len(set(aliases)):

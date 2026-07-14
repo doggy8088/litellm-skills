@@ -37,6 +37,35 @@ class GeneratorUnitTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.generator.slug("///")
 
+    def test_validate_model_name_accepts_supported_provider_formats(self) -> None:
+        names = [
+            "Qwen/Qwen3-Coder:30B",
+            "gpt-oss:120b-cloud",
+            "vendor/model.v2+preview@2026",
+        ]
+        for name in names:
+            with self.subTest(name=name):
+                self.assertEqual(self.generator.validate_model_name(name), name)
+
+    def test_validate_model_name_rejects_unsafe_or_non_string_values(self) -> None:
+        invalid_names = [
+            123,
+            "bad|name",
+            "bad\nname",
+            "`bad`",
+            "x" * 201,
+        ]
+        for name in invalid_names:
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    self.generator.validate_model_name(name)
+
+    def test_markdown_table_code_escapes_structural_characters(self) -> None:
+        self.assertEqual(
+            self.generator.markdown_table_code("<bad>|`name`\nnext"),
+            "<code>&lt;bad&gt;&#124;`name` next</code>",
+        )
+
     def test_model_alias_includes_provider_id(self) -> None:
         provider = {"id": "openrouter"}
         self.assertEqual(
@@ -87,6 +116,47 @@ class GeneratorUnitTests(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 self.generator.refresh_ollama_cloud_catalog(catalog)
+
+    def test_refresh_rejects_unsafe_remote_model_without_mutating_catalog(self) -> None:
+        catalog = {
+            "providers": [
+                {
+                    "id": "ollama_cloud",
+                    "models": ["old-model"],
+                }
+            ]
+        }
+        payload = io.BytesIO(
+            json.dumps(
+                {
+                    "models": [
+                        {"name": "valid-model"},
+                        {"name": "injected|model"},
+                    ]
+                }
+            ).encode("utf-8")
+        )
+
+        with mock.patch.object(
+            self.generator.urllib.request,
+            "urlopen",
+            return_value=payload,
+        ):
+            with self.assertRaises(ValueError):
+                self.generator.refresh_ollama_cloud_catalog(catalog)
+
+        self.assertEqual(catalog["providers"][0]["models"], ["old-model"])
+
+    def test_render_rejects_unsafe_checked_in_model_name(self) -> None:
+        catalog = json.loads(
+            (ROOT / "examples" / "litellm-byok-forge" / "catalog.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        catalog["providers"][0]["models"][0] = "injected\nmodel"
+
+        with self.assertRaises(ValueError):
+            self.generator.render_outputs(catalog)
 
     def test_check_outputs_reports_missing_extra_and_changed_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

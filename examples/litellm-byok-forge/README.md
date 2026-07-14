@@ -157,6 +157,7 @@ general_settings:
 `catalog.json` 是已審查的輸入來源。若更新 manifest 或重新同步來源，執行：
 
 ```sh
+cd "$(git rev-parse --show-toplevel)"
 python3 scripts/generate_byok_forge_examples.py --refresh-ollama-cloud
 ```
 

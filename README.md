@@ -14,13 +14,13 @@
 使用 litellm-sdk-basics，設計一個不含真實 API key 的 completion 練習。
 ```
 
-維護者執行以下命令驗證全部技能：
+維護者需使用 Python 3.10 以上版本；CI 基準為 Python 3.12。執行以下命令驗證全部技能：
 
 ```sh
-python scripts/validate_skills.py
+python3 scripts/validate_skills.py
 ```
 
-外部連結由每週排程執行 `python scripts/check_links.py`；一般 pull request 不受暫時性網路錯誤影響。
+外部連結由每週排程執行 `python3 scripts/check_links.py`；一般 pull request 不受暫時性網路錯誤影響。
 
 * * *
 

@@ -41,6 +41,7 @@ SPENDLOG_COLUMNS=(
   completion_tokens
   startTime
   endTime
+  request_duration_ms
   completionStartTime
   model
   model_id
@@ -432,7 +433,7 @@ SCHEMA_SHA256="$(sha256sum "$SCHEMA_FILE" | awk '{print $1}')"
 EXPORTED_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 cat > "$MANIFEST_FILE" <<EOF
-archive_format=litellm_spendlogs_month_v2
+archive_format=litellm_spendlogs_month_v3
 table_schema=public
 table_name=LiteLLM_SpendLogs
 month=${MONTH}

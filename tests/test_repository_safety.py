@@ -118,6 +118,19 @@ class RepositorySafetyTests(unittest.TestCase):
         self.assertIn("--age-recipient", export_script)
         self.assertIn(".tar.gz.age", export_script)
 
+    def test_spendlog_shell_column_lists_preserve_request_duration(self) -> None:
+        for script_name in (
+            "export-spendlogs-month.sh",
+            "import-spendlogs-month.sh",
+        ):
+            script = (SPENDLOGS / script_name).read_text(encoding="utf-8")
+            match = re.search(r"SPENDLOG_COLUMNS=\(\n(?P<body>.*?)\n\)", script, re.DOTALL)
+            self.assertIsNotNone(match, f"找不到 {script_name} 的 SPENDLOG_COLUMNS")
+            columns = [line.strip() for line in match.group("body").splitlines()]
+            end_time_index = columns.index("endTime")
+            self.assertEqual(columns[end_time_index + 1], "request_duration_ms")
+            self.assertEqual(columns[end_time_index + 2], "completionStartTime")
+
     def test_custom_hook_cannot_rewrite_model_or_register_pricing(self) -> None:
         path = (
             ROOT

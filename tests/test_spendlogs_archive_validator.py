@@ -65,7 +65,7 @@ def build_archive(
     schema = b'CREATE TABLE public."LiteLLM_SpendLogs" ();\n'
     manifest = "\n".join(
         (
-            "archive_format=litellm_spendlogs_month_v2",
+            "archive_format=litellm_spendlogs_month_v3",
             "table_schema=public",
             "table_name=LiteLLM_SpendLogs",
             "month=2026-06",
@@ -113,6 +113,12 @@ class SpendLogsArchiveValidatorTests(unittest.TestCase):
             archive = root / "valid.tar.gz"
             build_archive(archive)
             self.validate(archive, root / "extracted")
+
+    def test_duration_column_matches_litellm_schema_order(self) -> None:
+        columns = VALIDATOR.SPENDLOG_COLUMNS
+        end_time_index = columns.index("endTime")
+        self.assertEqual(columns[end_time_index + 1], "request_duration_ms")
+        self.assertEqual(columns[end_time_index + 2], "completionStartTime")
 
     def test_rejects_parent_path_member_before_extraction(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

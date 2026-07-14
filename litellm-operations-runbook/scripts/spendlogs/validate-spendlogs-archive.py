@@ -18,7 +18,7 @@ import tarfile
 import tempfile
 
 
-ARCHIVE_FORMAT = "litellm_spendlogs_month_v2"
+ARCHIVE_FORMAT = "litellm_spendlogs_month_v3"
 EXPECTED_MEMBERS = {
     "manifest.env": "file",
     "data": "dir",
@@ -42,6 +42,7 @@ SPENDLOG_COLUMNS = [
     "completion_tokens",
     "startTime",
     "endTime",
+    "request_duration_ms",
     "completionStartTime",
     "model",
     "model_id",

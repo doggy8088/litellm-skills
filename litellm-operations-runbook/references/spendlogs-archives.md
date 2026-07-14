@@ -1,6 +1,8 @@
 # SpendLogs Archive Reference
 
 Use this for monthly `LiteLLM_SpendLogs` export/import/delete operations.
+The fixed CSV column contract was last checked on 2026-07-14 against the
+[LiteLLM Prisma schema](https://github.com/BerriAI/litellm/blob/litellm_internal_staging/schema.prisma#L3290-L3296).
 
 ## Export
 
@@ -18,7 +20,7 @@ scripts/spendlogs/export-spendlogs-month.sh \
 - Uses `REPEATABLE READ` while selecting request IDs and exporting data.
 - Supports `--dry-run` for count and output-path preview.
 - Uses process `umask 077`, validates plaintext below a mode-0700 temporary directory, then publishes only `.tar.gz.age` authenticated ciphertext and its `.sha256` sidecar.
-- Uses archive format `litellm_spendlogs_month_v2`. Version 1 archives are not accepted because they do not carry all required integrity evidence.
+- Uses archive format `litellm_spendlogs_month_v3`. Version 3 adds `request_duration_ms` between `endTime` and `completionStartTime` so latency survives export/import. Earlier archives are not accepted by this exact-header workflow because they may omit required integrity evidence or latency data.
 
 Post-export deletion is never implied by export. It requires all three flags and an exact count from a preceding dry-run:
 
@@ -43,7 +45,7 @@ scripts/spendlogs/import-spendlogs-month.sh \
   --age-identity /run/secrets/litellm-spendlogs-age-identity
 ```
 
-- Requires `manifest.env` and `archive_format=litellm_spendlogs_month_v2`.
+- Requires `manifest.env` and `archive_format=litellm_spendlogs_month_v3`.
 - Accepts only the six fixed archive members: `manifest.env`, the `data` and `schema` directories, and their three expected regular files.
 - Rejects absolute paths, `..` traversal, unexpected or duplicate members, and symbolic or hard links. Files are copied out with restrictive permissions instead of using unrestricted `tar -x` extraction.
 - Requires manifest file paths to exactly match the fixed member paths and verifies data, request-ID, and schema SHA-256 checksums.

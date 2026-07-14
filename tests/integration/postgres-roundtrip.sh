@@ -110,6 +110,7 @@ CREATE TABLE public."LiteLLM_SpendLogs" (
   completion_tokens bigint,
   "startTime" timestamp with time zone NOT NULL,
   "endTime" timestamp with time zone,
+  request_duration_ms integer,
   "completionStartTime" timestamp with time zone,
   model text,
   model_id text,
@@ -136,14 +137,14 @@ CREATE TABLE public."LiteLLM_SpendLogs" (
 
 INSERT INTO public."LiteLLM_SpendLogs" (
   request_id, call_type, spend, total_tokens, prompt_tokens,
-  completion_tokens, "startTime", "endTime", model, status
+  completion_tokens, "startTime", "endTime", request_duration_ms, model, status
 ) VALUES
   ('request-january-1', 'acompletion', 0.01, 15, 10, 5,
-   '2020-01-05T12:00:00Z', '2020-01-05T12:00:01Z', 'test-model', 'success'),
+   '2020-01-05T12:00:00Z', '2020-01-05T12:00:01Z', 1001, 'test-model', 'success'),
   ('request-january-2', 'acompletion', 0.02, 30, 20, 10,
-   '2020-01-31T23:59:59Z', '2020-01-31T23:59:59Z', 'test-model', 'success'),
+   '2020-01-31T23:59:59Z', '2020-01-31T23:59:59Z', 2022, 'test-model', 'success'),
   ('request-february-boundary', 'acompletion', 0.03, 45, 30, 15,
-   '2020-02-01T00:00:00Z', '2020-02-01T00:00:01Z', 'test-model', 'success');
+   '2020-02-01T00:00:00Z', '2020-02-01T00:00:01Z', 3033, 'test-model', 'success');
 SQL
 
 month_count() {
@@ -156,6 +157,12 @@ total_count() {
   compose exec -T postgres psql -X -Atq -U litellm -d litellm -c \
     'SELECT COUNT(*) FROM public."LiteLLM_SpendLogs";' \
     | tail -n 1 | tr -d '[:space:]'
+}
+
+duration_rows() {
+  compose exec -T postgres psql -X -Atq -U litellm -d litellm -c \
+    "SELECT request_id, request_duration_ms FROM public.\"LiteLLM_SpendLogs\" WHERE \"startTime\" >= '${TARGET_MONTH}-01T00:00:00Z'::timestamptz AND \"startTime\" < '2020-02-01T00:00:00Z'::timestamptz ORDER BY request_id;" \
+    | tr -d '\r'
 }
 
 assert_equal() {
@@ -224,6 +231,8 @@ grep -q '^inserted_rows=2$' <<<"$first_import_output" || \
   die "first import did not insert two rows"
 assert_equal 2 "$(month_count)" "target-month count after import"
 assert_equal 3 "$(total_count)" "total count after import"
+assert_equal $'request-january-1|1001\nrequest-january-2|2022' \
+  "$(duration_rows)" "request duration values after import"
 
 log "Re-importing to verify idempotency"
 second_import_output="$(
@@ -238,6 +247,8 @@ grep -q '^skipped_duplicates=2$' <<<"$second_import_output" || \
   die "second import did not report two skipped duplicates"
 assert_equal 2 "$(month_count)" "target-month count after idempotent import"
 assert_equal 3 "$(total_count)" "total count after idempotent import"
+assert_equal $'request-january-1|1001\nrequest-january-2|2022' \
+  "$(duration_rows)" "request duration values after idempotent import"
 
 log "Deleting the restored month with encrypted archive proof"
 LITELLM_PROJECT_DIR="$PROJECT_DIR" \

@@ -28,6 +28,7 @@ SPENDLOG_COLUMNS=(
   completion_tokens
   startTime
   endTime
+  request_duration_ms
   completionStartTime
   model
   model_id
@@ -398,7 +399,7 @@ ROW_COUNT="$(manifest_get row_count "$MANIFEST_FILE")"
 DATA_REL="$(manifest_get data_file "$MANIFEST_FILE")"
 REQUEST_IDS_REL="$(manifest_get request_ids_file "$MANIFEST_FILE")"
 
-[[ "$ARCHIVE_FORMAT" == "litellm_spendlogs_month_v2" ]] || die "Unsupported archive format: ${ARCHIVE_FORMAT:-missing}"
+[[ "$ARCHIVE_FORMAT" == "litellm_spendlogs_month_v3" ]] || die "Unsupported archive format: ${ARCHIVE_FORMAT:-missing}"
 [[ "$ROW_COUNT" =~ ^[0-9]+$ ]] || die "Invalid row_count in manifest: ${ROW_COUNT:-missing}"
 [[ "$DATA_REL" == "data/LiteLLM_SpendLogs.csv" ]] || die "Invalid data_file in manifest."
 [[ "$REQUEST_IDS_REL" == "data/request_ids.csv" ]] || die "Invalid request_ids_file in manifest."

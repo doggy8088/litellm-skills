@@ -61,7 +61,7 @@ python3 scripts/generate_byok_forge_examples.py --check
 
 ## LiteLLM provider/model 範例
 
-參考 [LiteLLM provider/model 範例](examples/litellm-byok-forge/)，可取得 16 個 providers、111 個 provider/model 個別設定，其中包含 Ollama Cloud 直接 API 的 34 個模型與本機登入後的 36 個 `:cloud` 變體，以及包含全部組合的 `all-models.yaml`。
+參考 [LiteLLM provider/model 範例](examples/litellm-byok-forge/)，可取得由 catalog 產生的個別設定、包含全部組合的 `all-models.yaml`，以及可讀的 [完整模型目錄](examples/litellm-byok-forge/model-catalog.md)。目前 Ollama Cloud 直接 API 與本機登入變體請見 [Ollama Cloud 模型清單](examples/litellm-byok-forge/ollama-cloud-models.md)。
 
 模型來源差異、查核方法與同步限制請見 [LiteLLM 與 Ollama Cloud 模型支援查核報告](docs/litellm-model-support-research.md)。
 

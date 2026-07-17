@@ -121,31 +121,6 @@ def validate_data_files(errors: list[str]) -> None:
             fail(errors, path, f"JSON 無法解析：{exc}")
 
 
-def validate_catalog_counts(errors: list[str]) -> None:
-    path = ROOT / "examples" / "litellm-byok-forge" / "catalog.json"
-    try:
-        catalog = json.loads(path.read_text(encoding="utf-8"))
-        providers = catalog["providers"]
-        provider_count = len(providers)
-        model_count = sum(len(provider["models"]) for provider in providers)
-    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
-        fail(errors, path, f"無法計算 catalog 統計：{exc}")
-        return
-
-    expected = {
-        ROOT / "README.md": [f"{provider_count} 個 providers、{model_count} 個"],
-        ROOT / "examples" / "litellm-byok-forge" / "README.md": [
-            f"共 {model_count} 份",
-            f"**{model_count}**",
-        ],
-    }
-    for document, snippets in expected.items():
-        text = document.read_text(encoding="utf-8")
-        for snippet in snippets:
-            if snippet not in text:
-                fail(errors, document, f"catalog 統計未同步：缺少 {snippet}")
-
-
 def main() -> int:
     errors: list[str] = []
     skills = sorted(ROOT.glob("litellm-*/SKILL.md"))
@@ -218,7 +193,6 @@ def main() -> int:
         fail(errors, capstone, "缺少跨技能整合實驗或完成定義")
 
     validate_data_files(errors)
-    validate_catalog_counts(errors)
 
     if errors:
         print("技能驗證失敗：", file=sys.stderr)

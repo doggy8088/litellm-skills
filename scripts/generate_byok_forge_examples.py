@@ -11,9 +11,10 @@ import re
 import shutil
 import tempfile
 import urllib.request
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 
@@ -23,6 +24,35 @@ CATALOG_PATH = EXAMPLES / "catalog.json"
 OLLAMA_CLOUD_TAGS_URL = "https://ollama.com/api/tags"
 OLLAMA_CLOUD_DOCS_URL = "https://docs.ollama.com/cloud"
 MODEL_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,199}")
+PROVIDER_ID_PATTERN = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)*")
+PROVIDER_PREFIX_PATTERN = re.compile(r"[a-z][a-z0-9_]*")
+ENVIRONMENT_NAME_PATTERN = re.compile(r"[A-Z][A-Z0-9_]*")
+COMMIT_PATTERN = re.compile(r"[0-9a-fA-F]{40}")
+ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+CONTROL_CHARACTER_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
+NAME_CONTROL_CHARACTER_PATTERN = re.compile(r"[\x00\r\n]")
+
+ROOT_FIELDS = frozenset({"source", "providers"})
+ROOT_SOURCE_FIELDS = frozenset(
+    {"repository", "commit", "file", "page", "extracted_at"}
+)
+PROVIDER_FIELDS = frozenset(
+    {
+        "id",
+        "name",
+        "prefix",
+        "env",
+        "models",
+        "keyless",
+        "needs_base",
+        "needs_version",
+        "base_default",
+        "version_default",
+        "source",
+    }
+)
+PROVIDER_REQUIRED_FIELDS = frozenset({"id", "name", "prefix", "env", "models"})
+PROVIDER_SOURCE_FIELDS = frozenset({"type", "url", "docs", "retrieved_at"})
 
 
 def validate_model_name(value: object) -> str:
@@ -33,6 +63,209 @@ def validate_model_name(value: object) -> str:
     if MODEL_NAME_PATTERN.fullmatch(value) is None:
         raise ValueError("模型名稱包含不允許的字元或長度超過 200 字元")
     return value
+
+
+def _validate_mapping(
+    value: object,
+    path: str,
+    *,
+    required: frozenset[str],
+    allowed: frozenset[str],
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} 必須是物件")
+
+    missing = sorted(required - value.keys())
+    if missing:
+        raise ValueError(f"{path}.{missing[0]} 是必要欄位")
+
+    unknown = [key for key in value if key not in allowed]
+    if unknown:
+        field = unknown[0]
+        if isinstance(field, str):
+            raise ValueError(f"{path}.{field} 是未知欄位")
+        raise ValueError(f"{path} 包含非字串欄位：{field!r}")
+    return value
+
+
+def _validate_text(
+    value: object,
+    path: str,
+    *,
+    control_pattern: re.Pattern[str] = CONTROL_CHARACTER_PATTERN,
+) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{path} 必須是非空字串")
+    if control_pattern.search(value) is not None:
+        raise ValueError(f"{path} 不得包含控制字元")
+    return value
+
+
+def _validate_http_url(value: object, path: str) -> str:
+    text = _validate_text(value, path)
+    try:
+        parsed = urlparse(text)
+        hostname = parsed.hostname
+    except ValueError as error:
+        raise ValueError(f"{path} 必須是具有 host 的 HTTP 或 HTTPS URL") from error
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise ValueError(f"{path} 必須是具有 host 的 HTTP 或 HTTPS URL")
+    return text
+
+
+def _validate_iso_date(value: object, path: str) -> str:
+    text = _validate_text(value, path)
+    if ISO_DATE_PATTERN.fullmatch(text) is None:
+        raise ValueError(f"{path} 必須是 YYYY-MM-DD 日期")
+    try:
+        date.fromisoformat(text)
+    except ValueError as error:
+        raise ValueError(f"{path} 必須是有效的 YYYY-MM-DD 日期") from error
+    return text
+
+
+def validate_catalog(catalog: object) -> None:
+    """Validate the complete checked-in catalog before rendering or refreshing."""
+
+    root = _validate_mapping(
+        catalog,
+        "catalog",
+        required=ROOT_FIELDS,
+        allowed=ROOT_FIELDS,
+    )
+    source = _validate_mapping(
+        root["source"],
+        "source",
+        required=ROOT_SOURCE_FIELDS,
+        allowed=ROOT_SOURCE_FIELDS,
+    )
+    for field in ("repository", "file"):
+        _validate_text(source[field], f"source.{field}")
+    commit = _validate_text(source["commit"], "source.commit")
+    if COMMIT_PATTERN.fullmatch(commit) is None:
+        raise ValueError("source.commit 必須是 40 位十六進位字串")
+    _validate_http_url(source["page"], "source.page")
+    _validate_iso_date(source["extracted_at"], "source.extracted_at")
+
+    providers = root["providers"]
+    if not isinstance(providers, list) or not providers:
+        raise ValueError("providers 必須是非空陣列")
+
+    provider_ids: set[str] = set()
+    aliases: set[str] = set()
+    for index, raw_provider in enumerate(providers):
+        provider_path = f"providers[{index}]"
+        if not isinstance(raw_provider, dict):
+            raise ValueError(f"{provider_path} 必須是物件")
+        raw_id = raw_provider.get("id")
+        provider_id = (
+            raw_id
+            if isinstance(raw_id, str)
+            and PROVIDER_ID_PATTERN.fullmatch(raw_id) is not None
+            else None
+        )
+        try:
+            provider = _validate_mapping(
+                raw_provider,
+                provider_path,
+                required=PROVIDER_REQUIRED_FIELDS,
+                allowed=PROVIDER_FIELDS,
+            )
+            provider_id_value = _validate_text(
+                provider["id"],
+                f"{provider_path}.id",
+            )
+            if PROVIDER_ID_PATTERN.fullmatch(provider_id_value) is None:
+                raise ValueError(
+                    f"{provider_path}.id 必須是安全的小寫 snake_case 識別字"
+                )
+            provider_id = provider_id_value
+            if provider_id in provider_ids:
+                raise ValueError(f"{provider_path}.id 與既有 provider 重複")
+            provider_ids.add(provider_id)
+
+            _validate_text(
+                provider["name"],
+                f"{provider_path}.name",
+                control_pattern=NAME_CONTROL_CHARACTER_PATTERN,
+            )
+            prefix = _validate_text(provider["prefix"], f"{provider_path}.prefix")
+            if PROVIDER_PREFIX_PATTERN.fullmatch(prefix) is None:
+                raise ValueError(
+                    f"{provider_path}.prefix 必須是小寫 provider prefix"
+                )
+
+            for flag in ("keyless", "needs_base", "needs_version"):
+                if flag in provider and type(provider[flag]) is not bool:
+                    raise ValueError(f"{provider_path}.{flag} 必須是布林值")
+            keyless = provider.get("keyless", False)
+            needs_base = provider.get("needs_base", False)
+            needs_version = provider.get("needs_version", False)
+
+            env = provider["env"]
+            if not isinstance(env, str):
+                raise ValueError(f"{provider_path}.env 必須是字串")
+            if keyless:
+                if env:
+                    raise ValueError(f"{provider_path}.env 在 keyless 模式必須為空字串")
+            elif ENVIRONMENT_NAME_PATTERN.fullmatch(env) is None:
+                raise ValueError(
+                    f"{provider_path}.env 必須是有效的大寫環境變數名稱"
+                )
+
+            if needs_base and "base_default" not in provider:
+                raise ValueError(f"{provider_path}.base_default 是必要欄位")
+            if "base_default" in provider:
+                _validate_http_url(
+                    provider["base_default"],
+                    f"{provider_path}.base_default",
+                )
+
+            if needs_version and "version_default" not in provider:
+                raise ValueError(f"{provider_path}.version_default 是必要欄位")
+            if "version_default" in provider:
+                _validate_text(
+                    provider["version_default"],
+                    f"{provider_path}.version_default",
+                )
+
+            models = provider["models"]
+            if not isinstance(models, list) or not models:
+                raise ValueError(f"{provider_path}.models 必須是非空陣列")
+            seen_models: set[str] = set()
+            for model_index, raw_model in enumerate(models):
+                model_path = f"{provider_path}.models[{model_index}]"
+                try:
+                    model = validate_model_name(raw_model)
+                except ValueError as error:
+                    raise ValueError(f"{model_path}：{error}") from error
+                if model in seen_models:
+                    raise ValueError(f"{model_path} 與同 provider 的模型重複")
+                seen_models.add(model)
+                alias = model_alias(provider, model)
+                if alias in aliases:
+                    raise ValueError(f"{model_path} 產生重複 model alias：{alias}")
+                aliases.add(alias)
+
+            if "source" in provider:
+                source_path = f"{provider_path}.source"
+                provider_source = _validate_mapping(
+                    provider["source"],
+                    source_path,
+                    required=PROVIDER_SOURCE_FIELDS,
+                    allowed=PROVIDER_SOURCE_FIELDS,
+                )
+                _validate_text(provider_source["type"], f"{source_path}.type")
+                _validate_http_url(provider_source["url"], f"{source_path}.url")
+                _validate_http_url(provider_source["docs"], f"{source_path}.docs")
+                _validate_iso_date(
+                    provider_source["retrieved_at"],
+                    f"{source_path}.retrieved_at",
+                )
+        except ValueError as error:
+            if provider_id is not None:
+                raise ValueError(f"{error}；provider id：{provider_id}") from error
+            raise
 
 
 def markdown_table_code(value: str) -> str:
@@ -325,26 +558,12 @@ def ollama_cloud_catalog_text(catalog: dict[str, Any]) -> str:
 def render_outputs(catalog: dict[str, Any]) -> dict[Path, str]:
     """Render every generated artifact without touching the working tree."""
 
+    validate_catalog(catalog)
     providers = catalog["providers"]
-    if not isinstance(providers, list):
-        raise ValueError("catalog.json 的 providers 必須是陣列")
 
     entries: list[tuple[dict[str, Any], str]] = []
     for provider in providers:
-        if not isinstance(provider, dict):
-            raise ValueError("catalog.json 的 provider 項目必須是物件")
-        models = provider.get("models")
-        if not isinstance(models, list):
-            raise ValueError("catalog.json 的 models 必須是陣列")
-        entries.extend((provider, validate_model_name(model)) for model in models)
-
-    aliases = [model_alias(provider, model) for provider, model in entries]
-    if len(aliases) != len(set(aliases)):
-        raise ValueError("產生的 model_name 有重複值")
-
-    provider_ids = [provider["id"] for provider in providers]
-    if len(provider_ids) != len(set(provider_ids)):
-        raise ValueError("catalog.json 有重複 provider id")
+        entries.extend((provider, model) for model in provider["models"])
 
     outputs: dict[Path, str] = {}
     for provider, model in entries:
@@ -366,6 +585,31 @@ def render_outputs(catalog: dict[str, Any]) -> dict[Path, str]:
     return outputs
 
 
+def _provider_yaml_files(examples: Path) -> set[Path]:
+    """Return provider YAML paths without following symlinked directories."""
+
+    provider_root = examples / "providers"
+    if provider_root.is_symlink() or not provider_root.is_dir():
+        return set()
+
+    provider_files: set[Path] = set()
+    for directory, directory_names, filenames in os.walk(
+        provider_root,
+        followlinks=False,
+    ):
+        current_directory = Path(directory)
+        directory_names[:] = [
+            name
+            for name in directory_names
+            if not (current_directory / name).is_symlink()
+        ]
+        for filename in filenames:
+            path = current_directory / filename
+            if path.suffix == ".yaml":
+                provider_files.add(path.relative_to(examples))
+    return provider_files
+
+
 def check_outputs(outputs: dict[Path, str]) -> list[str]:
     """Return generated-artifact drift without modifying files."""
 
@@ -373,10 +617,7 @@ def check_outputs(outputs: dict[Path, str]) -> list[str]:
     expected_provider_files = {
         path for path in outputs if path.parts and path.parts[0] == "providers"
     }
-    actual_provider_files = {
-        path.relative_to(EXAMPLES)
-        for path in (EXAMPLES / "providers").glob("*/*.yaml")
-    }
+    actual_provider_files = _provider_yaml_files(EXAMPLES)
     for path in sorted(expected_provider_files - actual_provider_files):
         errors.append(f"缺少生成檔：{path}")
     for path in sorted(actual_provider_files - expected_provider_files):
@@ -432,9 +673,7 @@ def write_outputs_atomically(
         path for path in outputs if path.parts and path.parts[0] == "providers"
     }
     provider_root = examples / "providers"
-    actual_provider_files = {
-        path.relative_to(examples) for path in provider_root.glob("*/*.yaml")
-    }
+    actual_provider_files = _provider_yaml_files(examples)
     stale_provider_files = actual_provider_files - expected_provider_files
     touched_paths = set(payloads) | stale_provider_files
 
@@ -483,7 +722,7 @@ def write_outputs_atomically(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 created_directories.update(missing_parents)
                 os.replace(_safe_target(staged_root, relative_path), target)
-        except Exception as error:
+        except BaseException as error:
             rollback_errors: list[str] = []
             for relative_path in sorted(touched_paths, key=str):
                 target = _safe_target(examples, relative_path)
@@ -504,9 +743,12 @@ def write_outputs_atomically(
                 raise RuntimeError(f"生成失敗且無法完整回復：{details}") from error
             raise
 
-        obsolete_directories = {
-            _safe_target(examples, path).parent for path in stale_provider_files
-        }
+        obsolete_directories: set[Path] = set()
+        for path in stale_provider_files:
+            parent = _safe_target(examples, path).parent
+            while parent != provider_root:
+                obsolete_directories.add(parent)
+                parent = parent.parent
         _remove_empty_directories(obsolete_directories)
 
 
@@ -526,6 +768,7 @@ def main() -> int:
     args = parser.parse_args()
 
     catalog = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    validate_catalog(catalog)
     refreshed_model_count: int | None = None
     if args.refresh_ollama_cloud:
         refreshed_model_count = refresh_ollama_cloud_catalog(catalog)

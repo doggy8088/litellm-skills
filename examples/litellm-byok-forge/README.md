@@ -4,43 +4,25 @@
 
 BYOK Forge 來源是 `doggy8088/byok-forge` 的 `litellm.html`，擷取 commit 為 `6b1d5012cbe0391817a79387894db2493de3b047`；可在 [BYOK Forge LiteLLM Config Forge](https://byok-forge.gh.miniasp.com/litellm.html) 查看原始介面與其 catalog。
 
-Ollama Cloud 分成兩種必須分開處理的使用方式：直接呼叫 `https://ollama.com` 的 API 在 `2026-07-12` 回傳 **34 個模型名稱**；本機 Ollama 執行 `ollama signin` 後可使用官方 model library 的 **36 個 `:cloud` 變體**。完整清單請見 [Ollama Cloud 模型清單](ollama-cloud-models.md)，所有 provider/model 組合請見 [完整模型目錄](model-catalog.md)。
+Ollama Cloud 分成兩種必須分開處理的使用方式：直接呼叫 `https://ollama.com` 的 API，以及本機 Ollama 執行 `ollama signin` 後使用官方 model library 的 `:cloud` 變體。來源資料的查核日期記錄於 `catalog.json`；目前完整清單請見 [Ollama Cloud 模型清單](ollama-cloud-models.md)，所有 provider/model 組合請見 [完整模型目錄](model-catalog.md)。
 
-**這不是 LiteLLM 全部官方 providers/model 的永久目錄。** LiteLLM 官方文件指出 Ollama provider 可使用 Ollama 模型；Ollama Cloud 的 `/api/tags` 與公開 model library 也會變動。因此本目錄的「完整」是指查核日期當下的 34 個直接 API 名稱與 36 個本機登入變體，加上 BYOK Forge 的 41 個組合；重新同步前仍須依 provider 官方文件確認模型、帳戶方案與區域限制。
+**這不是 LiteLLM 全部官方 providers/model 的永久目錄。** LiteLLM 官方文件指出 Ollama provider 可使用 Ollama 模型；Ollama Cloud 的 `/api/tags` 與公開 model library 也會變動。因此本目錄的「完整」是指目前 `catalog.json` 內已查核的組合；重新同步前仍須依 provider 官方文件確認模型、帳戶方案與區域限制。
 
 ## 目錄內容
 
 | 路徑 | 用途 |
 | --- | --- |
 | `catalog.json` | provider、LiteLLM prefix、環境變數與模型清單的來源 manifest |
-| `providers/<provider>/<model>.yaml` | 每個 provider/model 組合各自一份設定，共 111 份 |
-| `all-models.yaml` | 將 111 個組合全部放在同一個 `model_list` 的完整設定 |
+| `providers/<provider>/<model>.yaml` | 每個 provider/model 組合各自一份設定 |
+| `all-models.yaml` | 將 catalog 中全部組合放在同一個 `model_list` 的完整設定 |
 | `model-catalog.md` | 所有 providers 與 provider/model alias 的可讀版清單 |
-| `ollama-cloud-models.md` | Ollama Cloud 直接 API 與本機登入變體的完整模型清單，共 70 個 |
+| `ollama-cloud-models.md` | Ollama Cloud 直接 API 與本機登入變體的完整模型清單 |
 | `.env.example` | 所有需要的 API key 與 master key placeholder |
 | `README.md` | 使用、命名與 provider-specific 注意事項 |
 
 ## Provider 統計
 
-| Provider | LiteLLM prefix | 模型數 |
-| --- | --- | ---: |
-| Mistral | `mistral` | 4 |
-| DeepSeek | `deepseek` | 2 |
-| Anthropic | `anthropic` | 3 |
-| Google Gemini | `gemini` | 3 |
-| Cerebras | `cerebras` | 3 |
-| Together AI | `together_ai` | 3 |
-| Fireworks | `fireworks_ai` | 2 |
-| Groq | `groq` | 3 |
-| OpenAI | `openai` | 4 |
-| OpenRouter | `openrouter` | 3 |
-| xAI Grok | `xai` | 2 |
-| Azure OpenAI | `azure` | 3 |
-| Ollama (local) | `ollama_chat` | 4 |
-| Ollama Cloud | `ollama_chat` | 34 |
-| Ollama Cloud (local signed-in) | `ollama_chat` | 36 |
-| vLLM | `hosted_vllm` | 2 |
-| **合計** |  | **111** |
+目前 provider、prefix、模型數與 alias 均由 `catalog.json` 產生，請直接查閱 [完整模型目錄](model-catalog.md)，避免在手寫說明中維護第二份統計。
 
 LiteLLM 官方 Ollama provider 文件：[Ollama provider](https://docs.litellm.ai/docs/providers/ollama)。Ollama Cloud API 與登入、API key、模型查詢方式：[Ollama Cloud 官方文件](https://docs.ollama.com/cloud)。完整查核與限制請見 [LiteLLM 與 Ollama Cloud 模型支援查核報告](../../docs/litellm-model-support-research.md)。
 
@@ -82,7 +64,7 @@ curl --fail http://127.0.0.1:4000/v1/chat/completions \
 
 ## 使用完整設定
 
-`all-models.yaml` 包含全部 111 個組合，其中包含 34 個 Ollama Cloud 直接 API 模型與 36 個本機登入變體。它會讀取所有非 local provider 的環境變數，因此只適合已準備多組 provider key，並已登入本機 Ollama 的環境：
+`all-models.yaml` 包含 catalog 中的全部組合，也包含目前收錄的 Ollama Cloud 直接 API 模型與本機登入變體。它會讀取所有非 local provider 的環境變數，因此只適合已準備多組 provider key，並已登入本機 Ollama 的環境：
 
 ```sh
 litellm --config all-models.yaml --host 127.0.0.1 --port 4000
@@ -118,7 +100,7 @@ curl --fail http://127.0.0.1:4000/v1/chat/completions \
   }'
 ```
 
-完整 70 個 Ollama Cloud 模型與對應 alias 請見 [ollama-cloud-models.md](ollama-cloud-models.md)。
+目前完整的 Ollama Cloud 模型與對應 alias 請見 [ollama-cloud-models.md](ollama-cloud-models.md)。
 
 ## 使用本機 Ollama 轉送 Cloud model
 
@@ -161,7 +143,7 @@ cd "$(git rev-parse --show-toplevel)"
 python3 scripts/generate_byok_forge_examples.py --refresh-ollama-cloud
 ```
 
-`--refresh-ollama-cloud` 會從 Ollama Cloud 官方 `/api/tags` 重新取得直接 API 模型名稱、更新 `catalog.json` 的查核日期，再產生 111 份個別 YAML、`all-models.yaml`、`model-catalog.md`、`ollama-cloud-models.md` 與 `.env.example`。本機登入後的 36 個 `:cloud` 變體是依官方 model library 查核後保存的 snapshot；若 model library 改變，請同步更新 `catalog.json` 的 `ollama_cloud_local` 區段與來源日期。不使用旗標時，產生器只依現有 `catalog.json` 重建檔案。產生器會先暫存並驗證全部內容，再以可回復流程更新所有生成物與目錄；任一步驟失敗時，不會留下部分更新的檔案。產生器也會驗證 provider id 與 model alias 不重複。不要手動把真實憑證填入產生檔後再提交。
+`--refresh-ollama-cloud` 會從 Ollama Cloud 官方 `/api/tags` 重新取得直接 API 模型名稱、更新 `catalog.json` 的查核日期，再為每個 provider/model 產生一份 YAML，並重建 `all-models.yaml`、`model-catalog.md`、`ollama-cloud-models.md` 與 `.env.example`。本機登入後的 `:cloud` 變體是依官方 model library 查核後保存的 snapshot；若 model library 改變，請同步更新 `catalog.json` 的 `ollama_cloud_local` 區段與來源日期。不使用旗標時，產生器只依現有 `catalog.json` 重建檔案。產生器會先暫存並驗證全部內容，再以可回復流程更新所有生成物與目錄；任一步驟失敗時，不會留下部分更新的檔案。產生器也會驗證 provider id 與 model alias 不重複。不要手動把真實憑證填入產生檔後再提交。
 
 提交前使用唯讀模式確認 catalog 與全部生成物同步：
 

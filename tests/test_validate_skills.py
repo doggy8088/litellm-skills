@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import unittest
+from tempfile import TemporaryDirectory
 from pathlib import Path
 
 
@@ -99,6 +100,44 @@ class ValidatorUnitTests(unittest.TestCase):
             errors,
         )
         self.assertEqual(errors, [])
+
+
+    def test_validate_data_files_accepts_empty_and_scalar_documents(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "empty.yaml").write_text("", encoding="utf-8")
+            (root / "scalar.yml").write_text("plain text\n", encoding="utf-8")
+            (root / "array.json").write_text("[]", encoding="utf-8")
+            (root / "scalar.json").write_text("null", encoding="utf-8")
+            errors: list[str] = []
+            original_root = self.validator.ROOT
+            self.validator.ROOT = root
+            try:
+                self.validator.validate_data_files(errors)
+            finally:
+                self.validator.ROOT = original_root
+
+        self.assertEqual(errors, [])
+
+    def test_validate_data_files_reports_invalid_yaml_and_json_and_skips_git(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "invalid.yaml").write_text("key: [unterminated", encoding="utf-8")
+            (root / "invalid.json").write_text("{not-json}", encoding="utf-8")
+            git_directory = root / ".git"
+            git_directory.mkdir()
+            (git_directory / "ignored.yml").write_text("key: [unterminated", encoding="utf-8")
+            errors: list[str] = []
+            original_root = self.validator.ROOT
+            self.validator.ROOT = root
+            try:
+                self.validator.validate_data_files(errors)
+            finally:
+                self.validator.ROOT = original_root
+
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(any("invalid.yaml" in error and "YAML 無法解析" in error for error in errors))
+        self.assertTrue(any("invalid.json" in error and "JSON 無法解析" in error for error in errors))
 
 
 if __name__ == "__main__":
